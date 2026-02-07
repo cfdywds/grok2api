@@ -92,21 +92,39 @@
               </div>
 
               <div class="md:col-span-2">
-                <label class="field-label">音频输入源</label>
-                <div class="flex flex-col gap-2">
-                  <label class="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" name="audioSource" id="micSource" value="microphone" checked class="cursor-pointer">
-                    <span class="text-sm">🎤 麦克风（与 AI 对话）</span>
-                  </label>
-                  <label class="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" name="audioSource" id="tabSource" value="tab" class="cursor-pointer">
-                    <span class="text-sm">🔊 浏览器标签页音频（翻译视频声音）</span>
-                  </label>
+                <label class="field-label">音频输入源（可多选）</label>
+                <div class="flex flex-col gap-3">
+                  <div>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" id="micSource" checked class="cursor-pointer">
+                      <span class="text-sm">🎤 麦克风（与 AI 对话）</span>
+                    </label>
+                    <div id="micVolumeControl" class="mt-2 ml-6 hidden">
+                      <div class="flex items-center justify-between">
+                        <label class="text-xs text-[var(--accents-5)]">音量</label>
+                        <span class="text-xs text-[var(--accents-5)]"><span id="micVolumeValue">100</span>%</span>
+                      </div>
+                      <input type="range" id="micVolume" class="range-input" min="0" max="100" step="5" value="100">
+                    </div>
+                  </div>
+                  <div>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" id="tabSource" class="cursor-pointer">
+                      <span class="text-sm">🔊 浏览器标签页音频（翻译视频声音）</span>
+                    </label>
+                    <div id="tabVolumeControl" class="mt-2 ml-6 hidden">
+                      <div class="flex items-center justify-between">
+                        <label class="text-xs text-[var(--accents-5)]">音量</label>
+                        <span class="text-xs text-[var(--accents-5)]"><span id="tabVolumeValue">30</span>%</span>
+                      </div>
+                      <input type="range" id="tabVolume" class="range-input" min="0" max="100" step="5" value="30">
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
             <div class="voice-hint mt-3">
-              提示：选择"浏览器标签页音频"后，点击开始会话时需要选择要共享音频的标签页。AI 会听到该标签页的声音并进行翻译。
+              提示：同时使用两个音频源时，建议降低标签页音频音量（默认30%），避免干扰麦克风对话。可以在会话中实时调整音量。
             </div>
           </div>
 

@@ -6,6 +6,10 @@
   let room = null;
   let visualizerTimer = null;
   let displayStream = null; // 用于存储屏幕共享音频流
+  let audioContext = null; // Web Audio API 上下文
+  let mixedStream = null; // 混合后的音频流
+  let micGainNode = null; // 麦克风增益节点
+  let tabGainNode = null; // 标签页音频增益节点
 
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
@@ -24,6 +28,12 @@
   const visualizer = document.getElementById('visualizer');
   const micSource = document.getElementById('micSource');
   const tabSource = document.getElementById('tabSource');
+  const micVolume = document.getElementById('micVolume');
+  const tabVolume = document.getElementById('tabVolume');
+  const micVolumeValue = document.getElementById('micVolumeValue');
+  const tabVolumeValue = document.getElementById('tabVolumeValue');
+  const micVolumeControl = document.getElementById('micVolumeControl');
+  const tabVolumeControl = document.getElementById('tabVolumeControl');
 
   function log(message, level = 'info') {
     if (!logContainer) {
@@ -193,12 +203,24 @@
 
       // 根据选择的音频源类型开启不同的音频输入
       const useTabAudio = tabSource && tabSource.checked;
+      const useMicAudio = micSource && micSource.checked;
 
+      log(`音频源选择: 麦克风=${useMicAudio}, 标签页=${useTabAudio}`);
+
+      // 如果两个都没选中，提示用户
+      if (!useTabAudio && !useMicAudio) {
+        log('请至少选择一个音频源（麦克风或标签页音频）', 'warn');
+        toast('请选择音频源', 'warning');
+        return;
+      }
+
+      // 收集所有音频源
+      const audioSources = [];
+
+      // 获取标签页音频
       if (useTabAudio) {
         log('正在请求浏览器标签页音频...');
         try {
-          // 请求屏幕共享，需要同时请求视频和音频
-          // 注意：某些浏览器不支持只捕获音频，需要同时请求视频
           displayStream = await navigator.mediaDevices.getDisplayMedia({
             video: {
               width: { ideal: 1 },
@@ -212,31 +234,22 @@
             }
           });
 
-          // 获取音频轨道
           const audioTracks = displayStream.getAudioTracks();
           if (audioTracks.length === 0) {
             throw new Error('未能获取到标签页音频，请确保选择了包含音频的标签页并勾选"共享标签页音频"');
           }
 
           log(`已获取标签页音频: ${audioTracks[0].label}`);
+          audioSources.push({ track: audioTracks[0], name: '标签页音频' });
 
-          // 停止视频轨道（我们只需要音频）
+          // 停止视频轨道
           const videoTracks = displayStream.getVideoTracks();
           videoTracks.forEach(track => {
             track.stop();
             displayStream.removeTrack(track);
           });
 
-          // 发布音频轨道到 LiveKit
-          for (const track of audioTracks) {
-            const localTrack = new Track.LocalAudioTrack(track);
-            await room.localParticipant.publishTrack(localTrack);
-          }
-
-          log('标签页音频已开启，AI 正在监听...');
-          toast('标签页音频连接成功，AI 会翻译听到的内容', 'success');
-
-          // 监听音频轨道结束事件（用户停止共享）
+          // 监听音频轨道结束事件
           audioTracks[0].addEventListener('ended', () => {
             log('标签页音频共享已停止', 'warn');
             toast('音频共享已停止', 'warning');
@@ -245,7 +258,6 @@
         } catch (err) {
           log(`获取标签页音频失败: ${err.message}`, 'error');
 
-          // 提供更详细的错误提示
           let errorMsg = '获取标签页音频失败';
           if (err.name === 'NotAllowedError') {
             errorMsg = '用户拒绝了音频共享请求';
@@ -258,16 +270,117 @@
           toast(errorMsg, 'error');
           throw new Error(errorMsg);
         }
-      } else {
-        log('正在开启麦克风...');
-        ensureMicSupport();
-        const tracks = await createLocalTracks({ audio: true, video: false });
-        for (const track of tracks) {
-          await room.localParticipant.publishTrack(track);
-        }
-        log('麦克风已开启');
-        toast('语音连接成功', 'success');
       }
+
+      // 获取麦克风音频
+      if (useMicAudio) {
+        log('正在开启麦克风...');
+        try {
+          ensureMicSupport();
+          const micStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false
+          });
+          const micTrack = micStream.getAudioTracks()[0];
+          log(`已获取麦克风: ${micTrack.label}`);
+          audioSources.push({ track: micTrack, name: '麦克风' });
+        } catch (err) {
+          log(`开启麦克风失败: ${err.message}`, 'error');
+          toast('麦克风开启失败', 'error');
+          if (audioSources.length === 0) {
+            throw new Error('无可用音频源');
+          }
+        }
+      }
+
+      // 如果只有一个音频源，直接发布
+      if (audioSources.length === 1) {
+        log(`使用单一音频源: ${audioSources[0].name}`);
+
+        // 直接发布已获取的轨道
+        const publication = await room.localParticipant.publishTrack(audioSources[0].track, {
+          name: audioSources[0].name === '麦克风' ? 'microphone' : 'tab-audio'
+        });
+
+        log(`已发布音频轨道: trackSid=${publication.trackSid}`);
+        log(`${audioSources[0].name}已开启，AI 正在监听...`);
+        toast('音频连接成功', 'success');
+      }
+      // 如果有多个音频源，混合后发布
+      else if (audioSources.length > 1) {
+        log(`检测到 ${audioSources.length} 个音频源，正在混合...`);
+
+        try {
+          // 创建 Web Audio API 上下文，使用标准采样率
+          audioContext = new (window.AudioContext || window.webkitAudioContext)({
+            sampleRate: 48000,  // 使用 48kHz 采样率，LiveKit 标准
+            latencyHint: 'interactive'  // 低延迟模式
+          });
+
+          log(`AudioContext 创建成功: sampleRate=${audioContext.sampleRate}Hz`);
+
+          // 创建混音器
+          const destination = audioContext.createMediaStreamDestination();
+
+          // 将所有音频源连接到混音器
+          for (const source of audioSources) {
+            const mediaStream = new MediaStream([source.track]);
+            const sourceNode = audioContext.createMediaStreamSource(mediaStream);
+
+            // 添加增益节点，可以调整音量
+            const gainNode = audioContext.createGain();
+
+            // 根据音频源类型设置初始音量
+            if (source.name === '麦克风') {
+              const micVol = micVolume ? parseInt(micVolume.value) / 100 : 1.0;
+              gainNode.gain.value = micVol;
+              micGainNode = gainNode;
+              log(`麦克风音量设置: ${Math.round(micVol * 100)}%`);
+            } else if (source.name === '标签页音频') {
+              const tabVol = tabVolume ? parseInt(tabVolume.value) / 100 : 0.3;
+              gainNode.gain.value = tabVol;
+              tabGainNode = gainNode;
+              log(`标签页音频音量设置: ${Math.round(tabVol * 100)}%`);
+            } else {
+              gainNode.gain.value = 1.0;
+            }
+
+            sourceNode.connect(gainNode);
+            gainNode.connect(destination);
+
+            log(`已添加音频源到混音器: ${source.name} (sampleRate=${source.track.getSettings().sampleRate}Hz)`);
+          }
+
+          // 获取混合后的音频轨道
+          mixedStream = destination.stream;
+          const mixedTrack = mixedStream.getAudioTracks()[0];
+
+          log(`音频混合完成: ${mixedTrack.label}, readyState=${mixedTrack.readyState}`);
+          log(`正在发布混合轨道...`);
+
+          // 直接发布混合轨道
+          const publication = await room.localParticipant.publishTrack(mixedTrack, {
+            name: 'mixed-audio',
+            audioBitrate: 64000  // 设置音频比特率
+          });
+
+          log(`已发布混合音频轨道: trackSid=${publication.trackSid}`);
+          log('所有音频源已混合并开启，AI 正在监听...');
+          log('提示: 可以在会话中实时调整音量滑块');
+          toast('多音频源混合成功，可实时调整音量', 'success');
+
+        } catch (err) {
+          log(`音频混合失败: ${err.message}`, 'error');
+          toast('音频混合失败，请尝试单独使用一个音频源', 'error');
+          throw err;
+        }
+      }
+
+      // 输出当前房间的所有本地轨道信息
+      log(`当前本地轨道数量: ${room.localParticipant.trackPublications.size}`);
+      room.localParticipant.trackPublications.forEach((pub, sid) => {
+        log(`  - ${pub.kind} 轨道: ${pub.trackName}, sid=${sid}, muted=${pub.isMuted}`);
+      });
     } catch (err) {
       const message = err && err.message ? err.message : '连接失败';
       log(`错误: ${message}`, 'error');
@@ -287,6 +400,21 @@
       displayStream = null;
       log('已停止标签页音频捕获');
     }
+    // 停止混合音频流
+    if (mixedStream) {
+      mixedStream.getTracks().forEach(track => track.stop());
+      mixedStream = null;
+      log('已停止混合音频流');
+    }
+    // 关闭 Audio Context
+    if (audioContext) {
+      await audioContext.close();
+      audioContext = null;
+      log('已关闭音频上下文');
+    }
+    // 重置增益节点
+    micGainNode = null;
+    tabGainNode = null;
     resetUI();
   }
 
@@ -328,6 +456,69 @@
     speedRange.style.setProperty('--range-progress', `${pct}%`);
     updateMeta();
   });
+
+  // 麦克风音量控制
+  if (micVolume) {
+    micVolume.addEventListener('input', (e) => {
+      const value = parseInt(e.target.value);
+      if (micVolumeValue) {
+        micVolumeValue.textContent = value;
+      }
+      // 实时调整增益
+      if (micGainNode) {
+        micGainNode.gain.value = value / 100;
+        log(`麦克风音量调整为: ${value}%`);
+      }
+    });
+  }
+
+  // 标签页音频音量控制
+  if (tabVolume) {
+    tabVolume.addEventListener('input', (e) => {
+      const value = parseInt(e.target.value);
+      if (tabVolumeValue) {
+        tabVolumeValue.textContent = value;
+      }
+      // 实时调整增益
+      if (tabGainNode) {
+        tabGainNode.gain.value = value / 100;
+        log(`标签页音频音量调整为: ${value}%`);
+      }
+    });
+  }
+
+  // 音频源选择变化时显示/隐藏音量控制
+  if (micSource) {
+    micSource.addEventListener('change', (e) => {
+      if (micVolumeControl) {
+        if (e.target.checked && tabSource && tabSource.checked) {
+          micVolumeControl.classList.remove('hidden');
+        } else {
+          micVolumeControl.classList.add('hidden');
+        }
+      }
+    });
+  }
+
+  if (tabSource) {
+    tabSource.addEventListener('change', (e) => {
+      if (tabVolumeControl) {
+        if (e.target.checked && micSource && micSource.checked) {
+          tabVolumeControl.classList.remove('hidden');
+        } else {
+          tabVolumeControl.classList.add('hidden');
+        }
+      }
+      // 同时更新麦克风音量控制的显示
+      if (micVolumeControl && micSource) {
+        if (e.target.checked && micSource.checked) {
+          micVolumeControl.classList.remove('hidden');
+        } else {
+          micVolumeControl.classList.add('hidden');
+        }
+      }
+    });
+  }
 
   voiceSelect.addEventListener('change', updateMeta);
   personalitySelect.addEventListener('change', updateMeta);
