@@ -20,6 +20,10 @@ class ImageMetadata(BaseModel):
     tags: List[str] = Field(default_factory=list, description="标签列表")
     nsfw: bool = Field(default=False, description="是否为敏感内容")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="额外元数据")
+    quality_score: Optional[float] = Field(None, description="图片质量综合评分（0-100）")
+    blur_score: Optional[float] = Field(None, description="模糊度分数（越高越清晰）")
+    brightness_score: Optional[float] = Field(None, description="亮度分数（0-100，50为正常）")
+    quality_issues: List[str] = Field(default_factory=list, description="质量问题列表")
 
 
 class ImageFilter(BaseModel):
@@ -31,6 +35,9 @@ class ImageFilter(BaseModel):
     start_date: Optional[int] = Field(None, description="开始日期（时间戳）")
     end_date: Optional[int] = Field(None, description="结束日期（时间戳）")
     nsfw: Optional[bool] = Field(None, description="是否筛选敏感内容")
+    min_quality_score: Optional[float] = Field(None, description="最低质量分数筛选")
+    max_quality_score: Optional[float] = Field(None, description="最高质量分数筛选")
+    has_quality_issues: Optional[bool] = Field(None, description="是否筛选有质量问题的图片")
 
 
 class ImageListResponse(BaseModel):

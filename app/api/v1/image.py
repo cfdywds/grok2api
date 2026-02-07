@@ -299,7 +299,7 @@ async def _save_image_metadata(
     response_format: str,
 ):
     """
-    异步保存图片元数据
+    异步保存图片元数据，并进行质量检测
 
     Args:
         selected_images: 生成的图片列表（base64 或 URL）
@@ -316,6 +316,9 @@ async def _save_image_metadata(
         for img_data in selected_images:
             if img_data == "error" or not img_data:
                 continue
+
+            image_id = None
+            file_path = None
 
             try:
                 # 生成唯一 ID
@@ -370,8 +373,40 @@ async def _save_image_metadata(
                 await service.add_image(metadata)
                 logger.info(f"保存图片元数据成功: {image_id}")
 
+                # 质量检测：如果评分低于30分，自动删除
+                try:
+                    quality_result = await service.analyze_image_quality(image_id)
+                    if quality_result:
+                        quality_score = quality_result.get("quality_score", 100)
+                        quality_issues = quality_result.get("quality_issues", [])
+
+                        logger.info(f"图片质量评分: {quality_score:.2f}, 问题: {quality_issues}")
+
+                        # 评分低于30分，删除图片
+                        if quality_score < 30:
+                            logger.warning(f"图片质量过低 ({quality_score:.2f} < 30)，自动删除: {image_id}")
+
+                            # 删除图片和元数据
+                            await service.delete_images([image_id])
+                            logger.info(f"已删除低质量图片: {image_id}")
+                        else:
+                            # 更新质量元数据
+                            await service._update_quality_metadata(image_id, quality_result)
+                    else:
+                        logger.warning(f"质量检测失败，保留图片: {image_id}")
+
+                except Exception as e:
+                    # 质量检测失败不影响图片保存
+                    logger.warning(f"质量检测失败 {image_id}: {e}，保留图片")
+
             except Exception as e:
                 logger.error(f"保存单张图片元数据失败: {e}")
+                # 清理可能残留的文件
+                if file_path and file_path.exists():
+                    try:
+                        file_path.unlink()
+                    except Exception:
+                        pass
                 continue
 
     except Exception as e:

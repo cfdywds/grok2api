@@ -37,6 +37,108 @@ class ExportImagesRequest(BaseModel):
     image_ids: List[str]
 
 
+class ImportImageRequest(BaseModel):
+    """导入图片请求"""
+    source_path: str
+    tags: Optional[List[str]] = None
+
+
+class AnalyzeQualityRequest(BaseModel):
+    """分析图片质量请求"""
+    image_ids: Optional[List[str]] = None
+    update_metadata: bool = True
+    batch_size: int = 50
+
+
+@router.post("/scan")
+async def scan_local_images():
+    """
+    扫描本地图片文件夹，为没有元数据的图片创建元数据
+    """
+    try:
+        service = get_image_metadata_service()
+        result = await service.scan_local_images()
+
+        return {
+            "success": True,
+            "message": f"扫描完成: 新增 {result['added']}, 跳过 {result['skipped']}, 失败 {result['failed']}",
+            "data": result,
+        }
+
+    except Exception as e:
+        logger.error(f"扫描本地图片失败: {e}")
+        raise HTTPException(status_code=500, detail=f"扫描本地图片失败: {str(e)}")
+
+
+@router.post("/import")
+async def import_image(request: ImportImageRequest):
+    """
+    从指定路径导入图片
+    """
+    try:
+        service = get_image_metadata_service()
+        image_id = await service.import_image(request.source_path, request.tags)
+
+        if not image_id:
+            raise HTTPException(status_code=400, detail="导入图片失败")
+
+        return {
+            "success": True,
+            "message": "导入图片成功",
+            "data": {"image_id": image_id},
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"导入图片失败: {e}")
+        raise HTTPException(status_code=500, detail=f"导入图片失败: {str(e)}")
+
+
+@router.post("/upload")
+async def upload_image(
+    file: bytes = None,
+    filename: str = None,
+    tags: Optional[str] = None,
+):
+    """
+    上传图片文件
+    """
+    try:
+        from fastapi import File, UploadFile, Form
+        import tempfile
+
+        service = get_image_metadata_service()
+
+        # 创建临时文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as tmp_file:
+            tmp_file.write(file)
+            tmp_path = tmp_file.name
+
+        try:
+            # 导入图片
+            tag_list = tags.split(",") if tags else ["上传"]
+            image_id = await service.import_image(tmp_path, tag_list)
+
+            if not image_id:
+                raise HTTPException(status_code=400, detail="上传图片失败")
+
+            return {
+                "success": True,
+                "message": "上传图片成功",
+                "data": {"image_id": image_id},
+            }
+        finally:
+            # 清理临时文件
+            Path(tmp_path).unlink(missing_ok=True)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"上传图片失败: {e}")
+        raise HTTPException(status_code=500, detail=f"上传图片失败: {str(e)}")
+
+
 @router.get("/images", response_model=ImageListResponse)
 async def list_images(
     page: int = Query(1, ge=1, description="页码"),
@@ -48,6 +150,9 @@ async def list_images(
     start_date: Optional[int] = Query(None, description="开始日期（时间戳）"),
     end_date: Optional[int] = Query(None, description="结束日期（时间戳）"),
     nsfw: Optional[bool] = Query(None, description="是否筛选敏感内容"),
+    min_quality_score: Optional[float] = Query(None, description="最低质量分数筛选"),
+    max_quality_score: Optional[float] = Query(None, description="最高质量分数筛选"),
+    has_quality_issues: Optional[bool] = Query(None, description="是否筛选有质量问题的图片"),
     sort_by: str = Query("created_at", description="排序字段"),
     sort_order: str = Query("desc", description="排序顺序（asc/desc）"),
 ):
@@ -56,6 +161,9 @@ async def list_images(
     """
     try:
         service = get_image_metadata_service()
+
+        # 调试日志
+        logger.info(f"API 接收参数: min_quality_score={min_quality_score}, max_quality_score={max_quality_score}")
 
         # 构建筛选条件
         filters = ImageFilter(
@@ -66,7 +174,13 @@ async def list_images(
             start_date=start_date,
             end_date=end_date,
             nsfw=nsfw,
+            min_quality_score=min_quality_score,
+            max_quality_score=max_quality_score,
+            has_quality_issues=has_quality_issues,
         )
+
+        # 调试日志
+        logger.info(f"构建的筛选条件: {filters}")
 
         # 获取图片列表
         result = await service.list_images(
@@ -76,6 +190,9 @@ async def list_images(
             sort_by=sort_by,
             sort_order=sort_order,
         )
+
+        # 调试日志
+        logger.info(f"返回结果: total={result.total}, images_count={len(result.images)}")
 
         return result
 
@@ -225,3 +342,51 @@ async def export_images(request: ExportImagesRequest):
     except Exception as e:
         logger.error(f"批量导出图片失败: {e}")
         raise HTTPException(status_code=500, detail=f"批量导出图片失败: {str(e)}")
+
+
+@router.post("/analyze-quality")
+async def analyze_quality(request: AnalyzeQualityRequest):
+    """
+    批量分析图片质量
+    """
+    try:
+        service = get_image_metadata_service()
+        result = await service.batch_analyze_quality(
+            image_ids=request.image_ids,
+            update_metadata=request.update_metadata,
+            batch_size=request.batch_size,
+        )
+
+        return {
+            "success": True,
+            "message": f"分析完成: 成功 {result['analyzed']}, 失败 {result['failed']}, 低质量 {result['low_quality_count']}",
+            "data": result,
+        }
+
+    except Exception as e:
+        logger.error(f"批量分析图片质量失败: {e}")
+        raise HTTPException(status_code=500, detail=f"批量分析图片质量失败: {str(e)}")
+
+
+@router.get("/images/{image_id}/quality")
+async def get_image_quality(image_id: str):
+    """
+    获取单张图片的质量分析
+    """
+    try:
+        service = get_image_metadata_service()
+        result = await service.analyze_image_quality(image_id)
+
+        if not result:
+            raise HTTPException(status_code=404, detail="图片不存在或分析失败")
+
+        return {
+            "success": True,
+            "data": result,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取图片质量失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取图片质量失败: {str(e)}")

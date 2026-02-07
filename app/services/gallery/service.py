@@ -100,9 +100,13 @@ class ImageMetadataService:
             data = await self.storage.load_image_metadata()
             images = data.get("images", [])
 
+            logger.info(f"加载图片总数: {len(images)}")
+            logger.info(f"筛选条件: {filters}")
+
             # 应用筛选
             if filters:
                 images = self._apply_filters(images, filters)
+                logger.info(f"筛选后图片数量: {len(images)}")
 
             # 排序
             reverse = sort_order.lower() == "desc"
@@ -114,6 +118,8 @@ class ImageMetadataService:
             start = (page - 1) * page_size
             end = start + page_size
             page_images = images[start:end]
+
+            logger.info(f"分页后: total={total}, page_images={len(page_images)}")
 
             # 转换为模型
             image_models = [ImageMetadata(**img) for img in page_images]
@@ -188,6 +194,38 @@ class ImageMetadataService:
                 img for img in filtered
                 if img.get("nsfw", False) == filters.nsfw
             ]
+
+        # 质量分数筛选
+        if filters.min_quality_score is not None:
+            before_count = len(filtered)
+            filtered = [
+                img for img in filtered
+                if img.get("quality_score") is not None and img.get("quality_score") >= filters.min_quality_score
+            ]
+            logger.info(f"min_quality_score={filters.min_quality_score} 筛选: {before_count} -> {len(filtered)}")
+
+        if filters.max_quality_score is not None:
+            before_count = len(filtered)
+            filtered = [
+                img for img in filtered
+                if img.get("quality_score") is not None and img.get("quality_score") <= filters.max_quality_score
+            ]
+            logger.info(f"max_quality_score={filters.max_quality_score} 筛选: {before_count} -> {len(filtered)}")
+
+        # 质量问题筛选
+        if filters.has_quality_issues is not None:
+            if filters.has_quality_issues:
+                # 只显示有质量问题的图片
+                filtered = [
+                    img for img in filtered
+                    if img.get("quality_issues") and len(img.get("quality_issues", [])) > 0
+                ]
+            else:
+                # 只显示没有质量问题的图片
+                filtered = [
+                    img for img in filtered
+                    if not img.get("quality_issues") or len(img.get("quality_issues", [])) == 0
+                ]
 
         return filtered
 
@@ -411,6 +449,397 @@ class ImageMetadataService:
         except Exception as e:
             logger.error(f"清理孤立元数据失败: {e}")
             return 0
+
+    async def scan_local_images(self) -> Dict[str, Any]:
+        """
+        扫描本地图片文件夹，为没有元数据的图片创建元数据
+
+        Returns:
+            扫描结果统计
+        """
+        try:
+            from PIL import Image
+            import uuid
+
+            async with self.storage.acquire_lock("image_metadata", timeout=10):
+                data = await self.storage.load_image_metadata()
+                images = data.get("images", [])
+
+                # 获取已有的文件名集合
+                existing_filenames = {img.get("filename") for img in images}
+
+                # 确保图片目录存在
+                self.image_dir.mkdir(parents=True, exist_ok=True)
+
+                # 扫描图片文件
+                added_count = 0
+                skipped_count = 0
+                failed_count = 0
+
+                # 支持的图片格式
+                image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
+
+                for file_path in self.image_dir.iterdir():
+                    if not file_path.is_file():
+                        continue
+
+                    # 检查文件扩展名
+                    if file_path.suffix.lower() not in image_extensions:
+                        continue
+
+                    # 如果已有元数据，跳过
+                    if file_path.name in existing_filenames:
+                        skipped_count += 1
+                        continue
+
+                    try:
+                        # 读取图片信息
+                        with Image.open(file_path) as img:
+                            width, height = img.size
+                            file_size = file_path.stat().st_size
+                            created_at = int(file_path.stat().st_mtime * 1000)
+
+                            # 计算宽高比
+                            gcd_val = self._gcd(width, height)
+                            aspect_w = width // gcd_val
+                            aspect_h = height // gcd_val
+                            aspect_ratio = f"{aspect_w}:{aspect_h}"
+
+                            # 创建元数据
+                            metadata = ImageMetadata(
+                                id=str(uuid.uuid4()),
+                                filename=file_path.name,
+                                prompt=f"本地导入: {file_path.stem}",
+                                model="local-import",
+                                aspect_ratio=aspect_ratio,
+                                created_at=created_at,
+                                file_size=file_size,
+                                width=width,
+                                height=height,
+                                tags=["本地导入"],
+                                nsfw=False,
+                                metadata={}
+                            )
+
+                            # 添加到列表
+                            images.append(metadata.model_dump())
+                            added_count += 1
+                            logger.info(f"扫描到新图片: {file_path.name}")
+
+                    except Exception as e:
+                        logger.error(f"处理图片失败 {file_path.name}: {e}")
+                        failed_count += 1
+
+                # 保存元数据
+                if added_count > 0:
+                    data["images"] = images
+                    await self.storage.save_image_metadata(data)
+                    logger.info(f"扫描完成: 新增 {added_count}, 跳过 {skipped_count}, 失败 {failed_count}")
+
+                return {
+                    "added": added_count,
+                    "skipped": skipped_count,
+                    "failed": failed_count,
+                    "total": added_count + skipped_count + failed_count
+                }
+
+        except Exception as e:
+            logger.error(f"扫描本地图片失败: {e}")
+            return {
+                "added": 0,
+                "skipped": 0,
+                "failed": 0,
+                "total": 0,
+                "error": str(e)
+            }
+
+    def _gcd(self, a: int, b: int) -> int:
+        """计算最大公约数"""
+        while b:
+            a, b = b, a % b
+        return a
+
+    async def analyze_image_quality(self, image_id: str) -> Optional[Dict[str, Any]]:
+        """
+        分析单张图片的质量
+
+        Args:
+            image_id: 图片ID
+
+        Returns:
+            质量分析结果，包含 quality_score, blur_score, brightness_score, quality_issues
+        """
+        try:
+            import cv2
+            import numpy as np
+
+            # 获取图片元数据
+            metadata = await self.get_image(image_id)
+            if not metadata:
+                logger.error(f"图片不存在: {image_id}")
+                return None
+
+            # 读取图片文件
+            file_path = self.image_dir / metadata.filename
+            if not file_path.exists():
+                logger.error(f"图片文件不存在: {file_path}")
+                return None
+
+            # 使用OpenCV读取图片
+            img = cv2.imread(str(file_path))
+            if img is None:
+                logger.error(f"无法读取图片: {file_path}")
+                return None
+
+            # 转换为灰度图
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            # 1. 模糊度检测（拉普拉斯方差）
+            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+            # 归一化到0-100，通常清晰图片的方差 > 100
+            blur_score = min(100, laplacian_var / 10)
+
+            # 2. 亮度检测
+            brightness = np.mean(gray)
+            # 归一化到0-100，50为正常
+            brightness_score = brightness / 255 * 100
+
+            # 3. 对比度检测
+            contrast = gray.std()
+            # 归一化，通常对比度 > 30 为正常
+            contrast_score = min(100, contrast / 0.5)
+
+            # 4. 综合质量评分
+            quality_issues = []
+
+            # 极度模糊检测（阈值：20，针对马赛克、完全看不清的情况）
+            if blur_score < 20:
+                quality_issues.append("极度模糊")
+            # 严重模糊检测（阈值：35）
+            elif blur_score < 35:
+                quality_issues.append("严重模糊")
+
+            # 极度过暗检测（阈值：10，几乎全黑）
+            if brightness_score < 10:
+                quality_issues.append("极度过暗")
+            # 极度过亮检测（阈值：90，几乎全白）
+            elif brightness_score > 90:
+                quality_issues.append("极度过亮")
+
+            # 极低对比度检测（阈值：25，图片发灰严重）
+            if contrast_score < 25:
+                quality_issues.append("极低对比度")
+
+            # 计算综合评分（加权平均，模糊度权重大幅提高）
+            quality_score = (
+                blur_score * 0.7 +  # 模糊度权重大幅提高，主要筛选看不清的图片
+                contrast_score * 0.2 +  # 对比度权重降低
+                (100 - abs(brightness_score - 50) * 2) * 0.1  # 亮度权重降低
+            )
+            quality_score = max(0, min(100, quality_score))
+
+            result = {
+                "quality_score": float(round(quality_score, 2)),
+                "blur_score": float(round(blur_score, 2)),
+                "brightness_score": float(round(brightness_score, 2)),
+                "contrast_score": float(round(contrast_score, 2)),
+                "quality_issues": quality_issues
+            }
+
+            logger.info(f"图片质量分析完成: {image_id}, 评分: {quality_score:.2f}")
+            return result
+
+        except Exception as e:
+            logger.error(f"分析图片质量失败 {image_id}: {e}")
+            return None
+
+    async def batch_analyze_quality(
+        self,
+        image_ids: Optional[List[str]] = None,
+        update_metadata: bool = True,
+        batch_size: int = 50
+    ) -> Dict[str, Any]:
+        """
+        批量分析图片质量
+
+        Args:
+            image_ids: 图片ID列表，为None时分析所有图片
+            update_metadata: 是否更新元数据
+            batch_size: 批处理大小
+
+        Returns:
+            分析结果统计
+        """
+        try:
+            # 获取要分析的图片列表
+            if image_ids is None:
+                data = await self.storage.load_image_metadata()
+                all_images = data.get("images", [])
+                image_ids = [img["id"] for img in all_images]
+
+            total = len(image_ids)
+            analyzed = 0
+            failed = 0
+            low_quality_count = 0
+
+            logger.info(f"开始批量分析图片质量: 共 {total} 张")
+
+            # 分批处理
+            for i in range(0, total, batch_size):
+                batch_ids = image_ids[i:i + batch_size]
+
+                for image_id in batch_ids:
+                    result = await self.analyze_image_quality(image_id)
+
+                    if result:
+                        analyzed += 1
+
+                        # 统计低质量图片（评分 < 60）
+                        if result["quality_score"] < 60:
+                            low_quality_count += 1
+
+                        # 更新元数据
+                        if update_metadata:
+                            await self._update_quality_metadata(image_id, result)
+                    else:
+                        failed += 1
+
+                # 记录进度
+                progress = (i + len(batch_ids)) / total * 100
+                logger.info(f"分析进度: {progress:.1f}% ({i + len(batch_ids)}/{total})")
+
+            logger.info(f"批量分析完成: 成功 {analyzed}, 失败 {failed}, 低质量 {low_quality_count}")
+
+            return {
+                "total": total,
+                "analyzed": analyzed,
+                "failed": failed,
+                "low_quality_count": low_quality_count,
+                "low_quality_threshold": 60
+            }
+
+        except Exception as e:
+            logger.error(f"批量分析图片质量失败: {e}")
+            return {
+                "total": 0,
+                "analyzed": 0,
+                "failed": 0,
+                "low_quality_count": 0,
+                "error": str(e)
+            }
+
+    async def _update_quality_metadata(self, image_id: str, quality_result: Dict[str, Any]) -> bool:
+        """
+        更新图片的质量元数据
+
+        Args:
+            image_id: 图片ID
+            quality_result: 质量分析结果
+
+        Returns:
+            是否更新成功
+        """
+        try:
+            async with self.storage.acquire_lock("image_metadata", timeout=10):
+                data = await self.storage.load_image_metadata()
+                images = data.get("images", [])
+
+                # 查找并更新
+                found = False
+                for img in images:
+                    if img.get("id") == image_id:
+                        img["quality_score"] = quality_result["quality_score"]
+                        img["blur_score"] = quality_result["blur_score"]
+                        img["brightness_score"] = quality_result["brightness_score"]
+                        img["quality_issues"] = quality_result["quality_issues"]
+                        found = True
+                        break
+
+                if not found:
+                    return False
+
+                # 保存
+                await self.storage.save_image_metadata(data)
+                return True
+
+        except Exception as e:
+            logger.error(f"更新质量元数据失败 {image_id}: {e}")
+            return False
+
+    async def import_image(self, source_path: str, tags: Optional[List[str]] = None) -> Optional[str]:
+        """
+        从指定路径导入图片到图片文件夹
+
+        Args:
+            source_path: 源图片路径
+            tags: 可选的标签列表
+
+        Returns:
+            导入成功返回图片ID，失败返回None
+        """
+        try:
+            from PIL import Image
+            import uuid
+            import shutil
+
+            source = Path(source_path)
+            if not source.exists() or not source.is_file():
+                logger.error(f"源文件不存在: {source_path}")
+                return None
+
+            # 确保图片目录存在
+            self.image_dir.mkdir(parents=True, exist_ok=True)
+
+            # 生成新文件名（保留原扩展名）
+            image_id = str(uuid.uuid4())
+            new_filename = f"{image_id}{source.suffix}"
+            dest_path = self.image_dir / new_filename
+
+            # 复制文件
+            shutil.copy2(source, dest_path)
+
+            # 读取图片信息
+            with Image.open(dest_path) as img:
+                width, height = img.size
+                file_size = dest_path.stat().st_size
+                created_at = int(datetime.now().timestamp() * 1000)
+
+                # 计算宽高比
+                gcd_val = self._gcd(width, height)
+                aspect_w = width // gcd_val
+                aspect_h = height // gcd_val
+                aspect_ratio = f"{aspect_w}:{aspect_h}"
+
+                # 创建元数据
+                metadata = ImageMetadata(
+                    id=image_id,
+                    filename=new_filename,
+                    prompt=f"导入: {source.stem}",
+                    model="imported",
+                    aspect_ratio=aspect_ratio,
+                    created_at=created_at,
+                    file_size=file_size,
+                    width=width,
+                    height=height,
+                    tags=tags or ["导入"],
+                    nsfw=False,
+                    metadata={"source": str(source)}
+                )
+
+                # 添加元数据
+                success = await self.add_image(metadata)
+                if success:
+                    logger.info(f"导入图片成功: {source.name} -> {new_filename}")
+                    return image_id
+                else:
+                    # 如果添加元数据失败，删除已复制的文件
+                    dest_path.unlink()
+                    logger.error(f"添加元数据失败，已删除文件: {new_filename}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"导入图片失败: {e}")
+            return None
 
 
 # 全局单例

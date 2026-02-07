@@ -43,8 +43,10 @@ env/
 # Logs
 logs/
 *.log
+server.log
+nul
 
-# Data
+# Data - 敏感数据和生成的图片
 data/*.json
 data/tmp/*
 data/.locks/*
@@ -52,10 +54,41 @@ app/data/*.json
 app/data/tmp/*
 app/data/.locks/*
 
+# 配置文件 - 敏感配置
+data/config.toml
+config.local.toml
+
 # Testing
 .pytest_cache/
 .coverage
 htmlcov/
+test_*.py
+test_response.json
 
-# Project specific
-config.local.toml
+# 图片文件 - 不提交生成的图片
+data/tmp/image/*.jpg
+data/tmp/image/*.jpeg
+data/tmp/image/*.png
+data/tmp/image/*.webp
+data/tmp/image/*.gif
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+
+# 临时文件
+openapi.json
+openapi_temp.json
+
+# Claude 配置
+.claude/
+
+# 文档 - 保留主要文档，删除冗余文档
+README_图片管理.md
+README_图片管理功能.md
+使用说明.md
+使用演示.md
+图片管理功能完善总结.md
+完成总结.txt
+claude.md

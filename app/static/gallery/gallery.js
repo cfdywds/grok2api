@@ -15,6 +15,9 @@ const state = {
         aspectRatio: '',
         sortBy: 'created_at',
         sortOrder: 'desc',
+        minQualityScore: null,
+        maxQualityScore: null,
+        hasQualityIssues: null,
     },
     currentImageId: null,
 };
@@ -66,6 +69,9 @@ async function fetchImages() {
         if (state.filters.search) params.append('search', state.filters.search);
         if (state.filters.model) params.append('model', state.filters.model);
         if (state.filters.aspectRatio) params.append('aspect_ratio', state.filters.aspectRatio);
+        if (state.filters.minQualityScore !== null) params.append('min_quality_score', state.filters.minQualityScore);
+        if (state.filters.maxQualityScore !== null) params.append('max_quality_score', state.filters.maxQualityScore);
+        if (state.filters.hasQualityIssues !== null) params.append('has_quality_issues', state.filters.hasQualityIssues);
 
         const response = await fetch(`${API_BASE}/images?${params}`);
         const data = await response.json();
@@ -148,6 +154,109 @@ async function exportImages(imageIds) {
     }
 }
 
+async function scanLocalImages() {
+    try {
+        showLoading();
+        const response = await fetch(`${API_BASE}/scan`, {
+            method: 'POST',
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            alert(data.message);
+            fetchImages();
+            fetchStats();
+        } else {
+            alert('扫描失败，请重试');
+        }
+    } catch (error) {
+        console.error('扫描本地图片失败:', error);
+        alert('扫描失败，请重试');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function analyzeQuality(imageIds = null) {
+    try {
+        showLoading();
+        const response = await fetch(`${API_BASE}/analyze-quality`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_ids: imageIds,
+                update_metadata: true,
+                batch_size: 50,
+            }),
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            alert(data.message);
+            fetchImages();
+            fetchStats();
+        } else {
+            alert('分析失败，请重试');
+        }
+    } catch (error) {
+        console.error('分析图片质量失败:', error);
+        alert('分析失败，请重试');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function uploadImages(files) {
+    try {
+        showLoading();
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const file of files) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('filename', file.name);
+            formData.append('tags', '上传');
+
+            try {
+                const response = await fetch(`${API_BASE}/upload`, {
+                    method: 'POST',
+                    body: formData,
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    successCount++;
+                } else {
+                    failCount++;
+                }
+            } catch (error) {
+                console.error(`上传图片失败 ${file.name}:`, error);
+                failCount++;
+            }
+        }
+
+        alert(`上传完成: 成功 ${successCount}, 失败 ${failCount}`);
+        fetchImages();
+        fetchStats();
+        toggleUploadArea(false);
+    } catch (error) {
+        console.error('上传图片失败:', error);
+        alert('上传失败，请重试');
+    } finally {
+        hideLoading();
+    }
+}
+
+function toggleUploadArea(show) {
+    const uploadArea = document.getElementById('upload-area');
+    if (show) {
+        uploadArea.classList.add('active');
+    } else {
+        uploadArea.classList.remove('active');
+    }
+}
+
 // UI 更新
 function updateStats(stats) {
     document.getElementById('stat-total').textContent = stats.total_count || 0;
@@ -187,8 +296,20 @@ function createImageCard(image) {
 
     const isSelected = state.selectedIds.has(image.id);
 
+    // 质量评分显示
+    let qualityBadge = '';
+    if (image.quality_score !== null && image.quality_score !== undefined) {
+        const score = image.quality_score;
+        let qualityClass = 'quality-low';
+        if (score >= 80) qualityClass = 'quality-high';
+        else if (score >= 60) qualityClass = 'quality-medium';
+
+        qualityBadge = `<div class="quality-badge ${qualityClass}">${score.toFixed(0)}</div>`;
+    }
+
     card.innerHTML = `
         <input type="checkbox" class="image-card-checkbox" ${isSelected ? 'checked' : ''}>
+        ${qualityBadge}
         <img src="/v1/files/image/${image.filename}" alt="${image.prompt}" class="image-card-img">
         <div class="image-card-info">
             <div class="image-card-prompt">${escapeHtml(image.prompt)}</div>
@@ -338,6 +459,40 @@ async function showImageDetail(imageId) {
     document.getElementById('detail-filesize').textContent = formatFileSize(image.file_size);
     document.getElementById('detail-time').textContent = formatDate(image.created_at);
 
+    // 显示质量信息
+    const qualityInfo = document.getElementById('quality-info');
+    if (image.quality_score !== null && image.quality_score !== undefined) {
+        qualityInfo.style.display = 'block';
+
+        const score = image.quality_score;
+        const fill = document.getElementById('detail-quality-fill');
+        const scoreText = document.getElementById('detail-quality-score');
+
+        // 设置进度条
+        fill.style.width = `${score}%`;
+        if (score >= 80) fill.style.backgroundColor = '#4caf50';
+        else if (score >= 60) fill.style.backgroundColor = '#ff9800';
+        else fill.style.backgroundColor = '#f44336';
+
+        scoreText.textContent = `${score.toFixed(0)}分`;
+
+        // 显示详细分数
+        document.getElementById('detail-blur').textContent = `模糊度: ${(image.blur_score || 0).toFixed(1)}`;
+        document.getElementById('detail-brightness').textContent = `亮度: ${(image.brightness_score || 0).toFixed(1)}`;
+
+        // 显示质量问题
+        const issuesContainer = document.getElementById('detail-quality-issues');
+        if (image.quality_issues && image.quality_issues.length > 0) {
+            issuesContainer.innerHTML = image.quality_issues.map(issue =>
+                `<span class="quality-issue-tag">${escapeHtml(issue)}</span>`
+            ).join('');
+        } else {
+            issuesContainer.innerHTML = '<span class="quality-ok">✓ 无质量问题</span>';
+        }
+    } else {
+        qualityInfo.style.display = 'none';
+    }
+
     // 渲染标签
     const tagsContainer = document.getElementById('detail-tags');
     tagsContainer.innerHTML = '';
@@ -380,6 +535,33 @@ function initEventListeners() {
         state.filters.sortBy = sortBy;
         state.filters.sortOrder = sortOrder;
 
+        // 质量筛选
+        const qualityValue = document.getElementById('quality-filter').value;
+        if (qualityValue === 'low40') {
+            // 低于40分
+            state.filters.minQualityScore = null;
+            state.filters.maxQualityScore = 40;
+            state.filters.hasQualityIssues = null;
+        } else if (qualityValue === 'low') {
+            // 低于60分
+            state.filters.minQualityScore = null;
+            state.filters.maxQualityScore = 60;
+            state.filters.hasQualityIssues = null;
+        } else if (qualityValue === 'issues') {
+            state.filters.minQualityScore = null;
+            state.filters.maxQualityScore = null;
+            state.filters.hasQualityIssues = true;
+        } else if (qualityValue) {
+            // 大于等于指定分数
+            state.filters.minQualityScore = parseFloat(qualityValue);
+            state.filters.maxQualityScore = null;
+            state.filters.hasQualityIssues = null;
+        } else {
+            state.filters.minQualityScore = null;
+            state.filters.maxQualityScore = null;
+            state.filters.hasQualityIssues = null;
+        }
+
         state.currentPage = 1;
         fetchImages();
     });
@@ -390,6 +572,7 @@ function initEventListeners() {
         document.getElementById('model-filter').value = '';
         document.getElementById('ratio-filter').value = '';
         document.getElementById('sort-filter').value = 'created_at:desc';
+        document.getElementById('quality-filter').value = '';
 
         state.filters = {
             search: '',
@@ -397,6 +580,9 @@ function initEventListeners() {
             aspectRatio: '',
             sortBy: 'created_at',
             sortOrder: 'desc',
+            minQualityScore: null,
+            maxQualityScore: null,
+            hasQualityIssues: null,
         };
 
         state.currentPage = 1;
@@ -530,6 +716,75 @@ function initEventListeners() {
         if (e.target.classList.contains('tag-remove')) {
             const tag = e.target.dataset.tag;
             await removeTag(tag);
+        }
+    });
+
+    // 同步本地按钮
+    document.getElementById('scan-btn').addEventListener('click', async () => {
+        if (confirm('确定要扫描本地图片文件夹吗？这将为所有没有元数据的图片创建记录。')) {
+            await scanLocalImages();
+        }
+    });
+
+    // 质量分析按钮
+    document.getElementById('analyze-btn').addEventListener('click', async () => {
+        const selectedCount = state.selectedIds.size;
+        let message = '';
+
+        if (selectedCount > 0) {
+            message = `确定要分析选中的 ${selectedCount} 张图片吗？`;
+        } else {
+            message = `确定要分析所有图片吗？这可能需要一些时间。`;
+        }
+
+        if (confirm(message)) {
+            const imageIds = selectedCount > 0 ? Array.from(state.selectedIds) : null;
+            await analyzeQuality(imageIds);
+        }
+    });
+
+    // 上传按钮
+    document.getElementById('upload-btn').addEventListener('click', () => {
+        const uploadArea = document.getElementById('upload-area');
+        const isActive = uploadArea.classList.contains('active');
+        toggleUploadArea(!isActive);
+    });
+
+    // 上传区域点击
+    document.getElementById('upload-dropzone').addEventListener('click', () => {
+        document.getElementById('file-input').click();
+    });
+
+    // 文件选择
+    document.getElementById('file-input').addEventListener('change', (e) => {
+        const files = Array.from(e.target.files);
+        if (files.length > 0) {
+            uploadImages(files);
+        }
+    });
+
+    // 拖拽上传
+    const dropzone = document.getElementById('upload-dropzone');
+
+    dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('dragover');
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+
+        const files = Array.from(e.dataTransfer.files).filter(file =>
+            file.type.startsWith('image/')
+        );
+
+        if (files.length > 0) {
+            uploadImages(files);
         }
     });
 }

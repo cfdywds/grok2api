@@ -7,7 +7,7 @@ video_format = "html"
 
 [network]
 timeout = 120
-base_proxy_url = ""
+base_proxy_url = "http://127.0.0.1:7890"
 asset_proxy_url = ""
 
 [security]

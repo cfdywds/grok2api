@@ -53,6 +53,8 @@
                     <select id="model-filter" class="filter-select">
                         <option value="">所有模型</option>
                         <option value="grok-imagine-1.0">grok-imagine-1.0</option>
+                        <option value="local-import">本地导入</option>
+                        <option value="imported">手动导入</option>
                     </select>
                     <select id="ratio-filter" class="filter-select">
                         <option value="">所有比例</option>
@@ -67,11 +69,31 @@
                         <option value="created_at:asc">最早优先</option>
                         <option value="file_size:desc">大小降序</option>
                         <option value="file_size:asc">大小升序</option>
+                        <option value="quality_score:desc">质量降序</option>
+                        <option value="quality_score:asc">质量升序</option>
+                    </select>
+                    <select id="quality-filter" class="filter-select">
+                        <option value="">所有质量</option>
+                        <option value="80">优质 (≥80分)</option>
+                        <option value="60">良好 (≥60分)</option>
+                        <option value="40">一般 (≥40分)</option>
+                        <option value="low40">低质量 (<40分)</option>
+                        <option value="low">较差 (<60分)</option>
+                        <option value="issues">有质量问题</option>
                     </select>
                     <button id="filter-btn" class="btn btn-primary">筛选</button>
                     <button id="reset-btn" class="btn btn-secondary">重置</button>
                 </div>
                 <div class="toolbar-right">
+                    <button id="analyze-btn" class="btn btn-warning" title="分析图片质量">
+                        <span>🔍</span> 质量分析
+                    </button>
+                    <button id="scan-btn" class="btn btn-primary" title="扫描本地图片文件夹">
+                        <span>🔄</span> 同步本地
+                    </button>
+                    <button id="upload-btn" class="btn btn-primary" title="上传图片">
+                        <span>📤</span> 上传
+                    </button>
                     <button id="view-grid" class="btn btn-icon active" title="网格视图">
                         <span>⊞</span>
                     </button>
@@ -81,6 +103,16 @@
                     <button id="select-all" class="btn btn-secondary">全选</button>
                     <button id="export-btn" class="btn btn-primary" disabled>导出</button>
                     <button id="delete-btn" class="btn btn-danger" disabled>删除</button>
+                </div>
+            </div>
+
+            <!-- 上传区域 -->
+            <div class="upload-area" id="upload-area">
+                <div class="upload-dropzone" id="upload-dropzone">
+                    <div class="upload-icon">📁</div>
+                    <div class="upload-text">点击或拖拽图片到此处上传</div>
+                    <div class="upload-hint">支持 JPG、PNG、WebP、GIF 格式</div>
+                    <input type="file" id="file-input" accept="image/*" multiple style="display: none;">
                 </div>
             </div>
 
@@ -143,6 +175,20 @@
                             <label>创建时间：</label>
                             <p id="detail-time"></p>
                         </div>
+                        <div class="info-group" id="quality-info" style="display: none;">
+                            <label>质量评分：</label>
+                            <div class="quality-info">
+                                <div class="quality-score-bar">
+                                    <div class="quality-score-fill" id="detail-quality-fill"></div>
+                                    <span class="quality-score-text" id="detail-quality-score">-</span>
+                                </div>
+                                <div class="quality-details">
+                                    <span id="detail-blur">模糊度: -</span>
+                                    <span id="detail-brightness">亮度: -</span>
+                                </div>
+                                <div class="quality-issues" id="detail-quality-issues"></div>
+                            </div>
+                        </div>
                         <div class="info-group">
                             <label>标签：</label>
                             <div id="detail-tags" class="tags-container"></div>
@@ -164,7 +210,7 @@
         </div>
     </div>
 
-    <script src="/static/gallery/gallery.js"></script>
+    <script src="/static/gallery/gallery.js?v=1.1.1"></script>
     <script>
         // 加载导航栏
         fetch('/static/common/header.html')
