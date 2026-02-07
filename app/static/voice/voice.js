@@ -197,9 +197,14 @@
       if (useTabAudio) {
         log('正在请求浏览器标签页音频...');
         try {
-          // 请求屏幕共享，只获取音频
+          // 请求屏幕共享，需要同时请求视频和音频
+          // 注意：某些浏览器不支持只捕获音频，需要同时请求视频
           displayStream = await navigator.mediaDevices.getDisplayMedia({
-            video: false,
+            video: {
+              width: { ideal: 1 },
+              height: { ideal: 1 },
+              frameRate: { ideal: 1 }
+            },
             audio: {
               echoCancellation: false,
               noiseSuppression: false,
@@ -210,10 +215,17 @@
           // 获取音频轨道
           const audioTracks = displayStream.getAudioTracks();
           if (audioTracks.length === 0) {
-            throw new Error('未能获取到标签页音频，请确保选择了包含音频的标签页');
+            throw new Error('未能获取到标签页音频，请确保选择了包含音频的标签页并勾选"共享标签页音频"');
           }
 
           log(`已获取标签页音频: ${audioTracks[0].label}`);
+
+          // 停止视频轨道（我们只需要音频）
+          const videoTracks = displayStream.getVideoTracks();
+          videoTracks.forEach(track => {
+            track.stop();
+            displayStream.removeTrack(track);
+          });
 
           // 发布音频轨道到 LiveKit
           for (const track of audioTracks) {
@@ -232,8 +244,19 @@
 
         } catch (err) {
           log(`获取标签页音频失败: ${err.message}`, 'error');
-          toast('请选择包含音频的标签页', 'error');
-          throw err;
+
+          // 提供更详细的错误提示
+          let errorMsg = '获取标签页音频失败';
+          if (err.name === 'NotAllowedError') {
+            errorMsg = '用户拒绝了音频共享请求';
+          } else if (err.name === 'NotSupportedError') {
+            errorMsg = '当前浏览器不支持标签页音频捕获，请使用 Chrome 或 Edge 浏览器';
+          } else if (err.message.includes('audio')) {
+            errorMsg = '请在共享时勾选"共享标签页音频"选项';
+          }
+
+          toast(errorMsg, 'error');
+          throw new Error(errorMsg);
         }
       } else {
         log('正在开启麦克风...');
