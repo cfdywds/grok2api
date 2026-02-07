@@ -363,7 +363,12 @@ body {
     margin-top: 30px;
 }
 
-#page-info {
+.pagination-top {
+    margin-top: 0;
+    margin-bottom: 20px;
+}
+
+#page-info, #page-info-top {
     font-size: 0.875rem;
     color: var(--text-muted);
 }

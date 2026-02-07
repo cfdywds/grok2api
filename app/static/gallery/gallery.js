@@ -408,20 +408,34 @@ function updateSelectionUI() {
 
 function updatePagination() {
     const pagination = document.getElementById('pagination');
+    const paginationTop = document.getElementById('pagination-top');
     const prevBtn = document.getElementById('prev-page');
     const nextBtn = document.getElementById('next-page');
+    const prevBtnTop = document.getElementById('prev-page-top');
+    const nextBtnTop = document.getElementById('next-page-top');
     const pageInfo = document.getElementById('page-info');
+    const pageInfoTop = document.getElementById('page-info-top');
 
     if (state.totalPages <= 1) {
         pagination.style.display = 'none';
+        paginationTop.style.display = 'none';
         return;
     }
 
     pagination.style.display = 'flex';
-    pageInfo.textContent = `第 ${state.currentPage} 页 / 共 ${state.totalPages} 页`;
+    paginationTop.style.display = 'flex';
 
-    prevBtn.disabled = state.currentPage <= 1;
-    nextBtn.disabled = state.currentPage >= state.totalPages;
+    const pageText = `第 ${state.currentPage} 页 / 共 ${state.totalPages} 页`;
+    pageInfo.textContent = pageText;
+    pageInfoTop.textContent = pageText;
+
+    const prevDisabled = state.currentPage <= 1;
+    const nextDisabled = state.currentPage >= state.totalPages;
+
+    prevBtn.disabled = prevDisabled;
+    nextBtn.disabled = nextDisabled;
+    prevBtnTop.disabled = prevDisabled;
+    nextBtnTop.disabled = nextDisabled;
 }
 
 function showLoading() {
@@ -689,11 +703,12 @@ function initEventListeners() {
         }
     });
 
-    // 分页
+    // 分页（底部）
     document.getElementById('prev-page').addEventListener('click', () => {
         if (state.currentPage > 1) {
             state.currentPage--;
             fetchImages();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
     });
 
@@ -701,6 +716,24 @@ function initEventListeners() {
         if (state.currentPage < state.totalPages) {
             state.currentPage++;
             fetchImages();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    });
+
+    // 分页（顶部）
+    document.getElementById('prev-page-top').addEventListener('click', () => {
+        if (state.currentPage > 1) {
+            state.currentPage--;
+            fetchImages();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    });
+
+    document.getElementById('next-page-top').addEventListener('click', () => {
+        if (state.currentPage < state.totalPages) {
+            state.currentPage++;
+            fetchImages();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
     });
 
