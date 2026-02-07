@@ -5,6 +5,7 @@
   let Track;
   let room = null;
   let visualizerTimer = null;
+  let displayStream = null; // 用于存储屏幕共享音频流
 
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
@@ -21,6 +22,8 @@
   const copyLogBtn = document.getElementById('copyLogBtn');
   const clearLogBtn = document.getElementById('clearLogBtn');
   const visualizer = document.getElementById('visualizer');
+  const micSource = document.getElementById('micSource');
+  const tabSource = document.getElementById('tabSource');
 
   function log(message, level = 'info') {
     if (!logContainer) {
@@ -188,14 +191,60 @@
       setStatus('connected', '通话中');
       setButtons(true);
 
-      log('正在开启麦克风...');
-      ensureMicSupport();
-      const tracks = await createLocalTracks({ audio: true, video: false });
-      for (const track of tracks) {
-        await room.localParticipant.publishTrack(track);
+      // 根据选择的音频源类型开启不同的音频输入
+      const useTabAudio = tabSource && tabSource.checked;
+
+      if (useTabAudio) {
+        log('正在请求浏览器标签页音频...');
+        try {
+          // 请求屏幕共享，只获取音频
+          displayStream = await navigator.mediaDevices.getDisplayMedia({
+            video: false,
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false
+            }
+          });
+
+          // 获取音频轨道
+          const audioTracks = displayStream.getAudioTracks();
+          if (audioTracks.length === 0) {
+            throw new Error('未能获取到标签页音频，请确保选择了包含音频的标签页');
+          }
+
+          log(`已获取标签页音频: ${audioTracks[0].label}`);
+
+          // 发布音频轨道到 LiveKit
+          for (const track of audioTracks) {
+            const localTrack = new Track.LocalAudioTrack(track);
+            await room.localParticipant.publishTrack(localTrack);
+          }
+
+          log('标签页音频已开启，AI 正在监听...');
+          toast('标签页音频连接成功，AI 会翻译听到的内容', 'success');
+
+          // 监听音频轨道结束事件（用户停止共享）
+          audioTracks[0].addEventListener('ended', () => {
+            log('标签页音频共享已停止', 'warn');
+            toast('音频共享已停止', 'warning');
+          });
+
+        } catch (err) {
+          log(`获取标签页音频失败: ${err.message}`, 'error');
+          toast('请选择包含音频的标签页', 'error');
+          throw err;
+        }
+      } else {
+        log('正在开启麦克风...');
+        ensureMicSupport();
+        const tracks = await createLocalTracks({ audio: true, video: false });
+        for (const track of tracks) {
+          await room.localParticipant.publishTrack(track);
+        }
+        log('麦克风已开启');
+        toast('语音连接成功', 'success');
       }
-      log('语音已开启');
-      toast('语音连接成功', 'success');
     } catch (err) {
       const message = err && err.message ? err.message : '连接失败';
       log(`错误: ${message}`, 'error');
@@ -208,6 +257,12 @@
   async function stopSession() {
     if (room) {
       await room.disconnect();
+    }
+    // 停止屏幕共享音频流
+    if (displayStream) {
+      displayStream.getTracks().forEach(track => track.stop());
+      displayStream = null;
+      log('已停止标签页音频捕获');
     }
     resetUI();
   }

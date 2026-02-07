@@ -90,8 +90,24 @@
                 </div>
                 <input type="range" id="speedRange" class="range-input" min="0.5" max="2.0" step="0.1" value="1.0">
               </div>
+
+              <div class="md:col-span-2">
+                <label class="field-label">音频输入源</label>
+                <div class="flex flex-col gap-2">
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="audioSource" id="micSource" value="microphone" checked class="cursor-pointer">
+                    <span class="text-sm">🎤 麦克风（与 AI 对话）</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="audioSource" id="tabSource" value="tab" class="cursor-pointer">
+                    <span class="text-sm">🔊 浏览器标签页音频（翻译视频声音）</span>
+                  </label>
+                </div>
+              </div>
             </div>
-            <div class="voice-hint mt-3">提示：Voice / Personality 会在建立连接前发送到服务端。</div>
+            <div class="voice-hint mt-3">
+              提示：选择"浏览器标签页音频"后，点击开始会话时需要选择要共享音频的标签页。AI 会听到该标签页的声音并进行翻译。
+            </div>
           </div>
 
           <div class="voice-card">
