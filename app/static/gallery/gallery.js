@@ -1,0 +1,584 @@
+// 图片管理 JavaScript
+
+// 全局状态
+const state = {
+    images: [],
+    selectedIds: new Set(),
+    currentPage: 1,
+    pageSize: 50,
+    totalPages: 0,
+    total: 0,
+    viewMode: 'grid', // 'grid' or 'list'
+    filters: {
+        search: '',
+        model: '',
+        aspectRatio: '',
+        sortBy: 'created_at',
+        sortOrder: 'desc',
+    },
+    currentImageId: null,
+};
+
+// API 基础路径
+const API_BASE = '/api/v1/admin/gallery';
+
+// 工具函数
+function formatFileSize(bytes) {
+    if (!bytes) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+function formatDate(timestamp) {
+    const date = new Date(timestamp);
+    return date.toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+// API 调用
+async function fetchStats() {
+    try {
+        const response = await fetch(`${API_BASE}/stats`);
+        const data = await response.json();
+        updateStats(data);
+    } catch (error) {
+        console.error('获取统计信息失败:', error);
+    }
+}
+
+async function fetchImages() {
+    showLoading();
+    try {
+        const params = new URLSearchParams({
+            page: state.currentPage,
+            page_size: state.pageSize,
+            sort_by: state.filters.sortBy,
+            sort_order: state.filters.sortOrder,
+        });
+
+        if (state.filters.search) params.append('search', state.filters.search);
+        if (state.filters.model) params.append('model', state.filters.model);
+        if (state.filters.aspectRatio) params.append('aspect_ratio', state.filters.aspectRatio);
+
+        const response = await fetch(`${API_BASE}/images?${params}`);
+        const data = await response.json();
+
+        state.images = data.images;
+        state.total = data.total;
+        state.totalPages = data.total_pages;
+
+        renderImages();
+        updatePagination();
+    } catch (error) {
+        console.error('获取图片列表失败:', error);
+        showEmpty();
+    }
+}
+
+async function fetchImageDetail(imageId) {
+    try {
+        const response = await fetch(`${API_BASE}/images/${imageId}`);
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('获取图片详情失败:', error);
+        return null;
+    }
+}
+
+async function deleteImages(imageIds) {
+    try {
+        const response = await fetch(`${API_BASE}/images/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_ids: imageIds }),
+        });
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('删除图片失败:', error);
+        return null;
+    }
+}
+
+async function updateTags(imageId, tags) {
+    try {
+        const response = await fetch(`${API_BASE}/images/${imageId}/tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tags }),
+        });
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('更新标签失败:', error);
+        return null;
+    }
+}
+
+async function exportImages(imageIds) {
+    try {
+        const response = await fetch(`${API_BASE}/images/export`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_ids: imageIds }),
+        });
+
+        if (!response.ok) throw new Error('导出失败');
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `images_export_${Date.now()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (error) {
+        console.error('导出图片失败:', error);
+        alert('导出失败，请重试');
+    }
+}
+
+// UI 更新
+function updateStats(stats) {
+    document.getElementById('stat-total').textContent = stats.total_count || 0;
+    document.getElementById('stat-size').textContent = formatFileSize(stats.total_size || 0);
+    document.getElementById('stat-month').textContent = stats.month_count || 0;
+
+    const topTags = stats.top_tags || [];
+    const tagsText = topTags.slice(0, 3).map(t => t.name).join(', ') || '-';
+    document.getElementById('stat-tags').textContent = tagsText;
+}
+
+function renderImages() {
+    const container = document.getElementById('images-container');
+    container.className = state.viewMode === 'grid' ? 'images-grid' : 'images-list';
+    container.innerHTML = '';
+
+    if (state.images.length === 0) {
+        showEmpty();
+        return;
+    }
+
+    hideLoading();
+    hideEmpty();
+
+    state.images.forEach(image => {
+        const element = state.viewMode === 'grid'
+            ? createImageCard(image)
+            : createImageListItem(image);
+        container.appendChild(element);
+    });
+}
+
+function createImageCard(image) {
+    const card = document.createElement('div');
+    card.className = 'image-card';
+    card.dataset.id = image.id;
+
+    const isSelected = state.selectedIds.has(image.id);
+
+    card.innerHTML = `
+        <input type="checkbox" class="image-card-checkbox" ${isSelected ? 'checked' : ''}>
+        <img src="/v1/files/image/${image.filename}" alt="${image.prompt}" class="image-card-img">
+        <div class="image-card-info">
+            <div class="image-card-prompt">${escapeHtml(image.prompt)}</div>
+            <div class="image-card-meta">
+                <span>${image.aspect_ratio}</span>
+                <span>${formatFileSize(image.file_size)}</span>
+            </div>
+            ${image.tags && image.tags.length > 0 ? `
+                <div class="image-card-tags">
+                    ${image.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
+                </div>
+            ` : ''}
+        </div>
+    `;
+
+    // 复选框事件
+    const checkbox = card.querySelector('.image-card-checkbox');
+    checkbox.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleSelection(image.id);
+    });
+
+    // 点击卡片显示详情
+    card.addEventListener('click', (e) => {
+        if (e.target !== checkbox) {
+            showImageDetail(image.id);
+        }
+    });
+
+    return card;
+}
+
+function createImageListItem(image) {
+    const item = document.createElement('div');
+    item.className = 'image-list-item';
+    item.dataset.id = image.id;
+
+    const isSelected = state.selectedIds.has(image.id);
+
+    item.innerHTML = `
+        <input type="checkbox" class="image-list-checkbox" ${isSelected ? 'checked' : ''}>
+        <img src="/v1/files/image/${image.filename}" alt="${image.prompt}" class="image-list-img">
+        <div class="image-list-info">
+            <div class="image-list-prompt">${escapeHtml(image.prompt)}</div>
+            <div class="image-list-meta">
+                <span>模型: ${image.model}</span>
+                <span>比例: ${image.aspect_ratio}</span>
+                <span>大小: ${formatFileSize(image.file_size)}</span>
+                <span>时间: ${formatDate(image.created_at)}</span>
+            </div>
+        </div>
+    `;
+
+    // 复选框事件
+    const checkbox = item.querySelector('.image-list-checkbox');
+    checkbox.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleSelection(image.id);
+    });
+
+    // 点击项显示详情
+    item.addEventListener('click', (e) => {
+        if (e.target !== checkbox) {
+            showImageDetail(image.id);
+        }
+    });
+
+    return item;
+}
+
+function toggleSelection(imageId) {
+    if (state.selectedIds.has(imageId)) {
+        state.selectedIds.delete(imageId);
+    } else {
+        state.selectedIds.add(imageId);
+    }
+    updateSelectionUI();
+}
+
+function updateSelectionUI() {
+    // 更新复选框状态
+    document.querySelectorAll('.image-card, .image-list-item').forEach(element => {
+        const id = element.dataset.id;
+        const checkbox = element.querySelector('input[type="checkbox"]');
+        if (checkbox) {
+            checkbox.checked = state.selectedIds.has(id);
+        }
+    });
+
+    // 更新按钮状态
+    const hasSelection = state.selectedIds.size > 0;
+    document.getElementById('export-btn').disabled = !hasSelection;
+    document.getElementById('delete-btn').disabled = !hasSelection;
+}
+
+function updatePagination() {
+    const pagination = document.getElementById('pagination');
+    const prevBtn = document.getElementById('prev-page');
+    const nextBtn = document.getElementById('next-page');
+    const pageInfo = document.getElementById('page-info');
+
+    if (state.totalPages <= 1) {
+        pagination.style.display = 'none';
+        return;
+    }
+
+    pagination.style.display = 'flex';
+    pageInfo.textContent = `第 ${state.currentPage} 页 / 共 ${state.totalPages} 页`;
+
+    prevBtn.disabled = state.currentPage <= 1;
+    nextBtn.disabled = state.currentPage >= state.totalPages;
+}
+
+function showLoading() {
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('images-container').style.display = 'none';
+    document.getElementById('empty-state').style.display = 'none';
+}
+
+function hideLoading() {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('images-container').style.display = state.viewMode === 'grid' ? 'grid' : 'flex';
+}
+
+function showEmpty() {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('images-container').style.display = 'none';
+    document.getElementById('empty-state').style.display = 'block';
+}
+
+function hideEmpty() {
+    document.getElementById('empty-state').style.display = 'none';
+}
+
+async function showImageDetail(imageId) {
+    const image = await fetchImageDetail(imageId);
+    if (!image) return;
+
+    state.currentImageId = imageId;
+
+    const modal = document.getElementById('detail-modal');
+    document.getElementById('detail-image').src = `/v1/files/image/${image.filename}`;
+    document.getElementById('detail-prompt').textContent = image.prompt;
+    document.getElementById('detail-model').textContent = image.model;
+    document.getElementById('detail-ratio').textContent = image.aspect_ratio;
+    document.getElementById('detail-size').textContent = `${image.width} × ${image.height}`;
+    document.getElementById('detail-filesize').textContent = formatFileSize(image.file_size);
+    document.getElementById('detail-time').textContent = formatDate(image.created_at);
+
+    // 渲染标签
+    const tagsContainer = document.getElementById('detail-tags');
+    tagsContainer.innerHTML = '';
+    if (image.tags && image.tags.length > 0) {
+        image.tags.forEach(tag => {
+            const tagElement = document.createElement('span');
+            tagElement.className = 'tag-removable';
+            tagElement.innerHTML = `
+                ${escapeHtml(tag)}
+                <span class="tag-remove" data-tag="${escapeHtml(tag)}">×</span>
+            `;
+            tagsContainer.appendChild(tagElement);
+        });
+    }
+
+    modal.style.display = 'flex';
+}
+
+function closeImageDetail() {
+    document.getElementById('detail-modal').style.display = 'none';
+    state.currentImageId = null;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 事件处理
+function initEventListeners() {
+    // 筛选按钮
+    document.getElementById('filter-btn').addEventListener('click', () => {
+        state.filters.search = document.getElementById('search-input').value;
+        state.filters.model = document.getElementById('model-filter').value;
+        state.filters.aspectRatio = document.getElementById('ratio-filter').value;
+
+        const sortValue = document.getElementById('sort-filter').value;
+        const [sortBy, sortOrder] = sortValue.split(':');
+        state.filters.sortBy = sortBy;
+        state.filters.sortOrder = sortOrder;
+
+        state.currentPage = 1;
+        fetchImages();
+    });
+
+    // 重置按钮
+    document.getElementById('reset-btn').addEventListener('click', () => {
+        document.getElementById('search-input').value = '';
+        document.getElementById('model-filter').value = '';
+        document.getElementById('ratio-filter').value = '';
+        document.getElementById('sort-filter').value = 'created_at:desc';
+
+        state.filters = {
+            search: '',
+            model: '',
+            aspectRatio: '',
+            sortBy: 'created_at',
+            sortOrder: 'desc',
+        };
+
+        state.currentPage = 1;
+        fetchImages();
+    });
+
+    // 搜索框回车
+    document.getElementById('search-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            document.getElementById('filter-btn').click();
+        }
+    });
+
+    // 视图切换
+    document.getElementById('view-grid').addEventListener('click', () => {
+        state.viewMode = 'grid';
+        document.getElementById('view-grid').classList.add('active');
+        document.getElementById('view-list').classList.remove('active');
+        renderImages();
+    });
+
+    document.getElementById('view-list').addEventListener('click', () => {
+        state.viewMode = 'list';
+        document.getElementById('view-list').classList.add('active');
+        document.getElementById('view-grid').classList.remove('active');
+        renderImages();
+    });
+
+    // 全选
+    document.getElementById('select-all').addEventListener('click', () => {
+        if (state.selectedIds.size === state.images.length) {
+            // 取消全选
+            state.selectedIds.clear();
+        } else {
+            // 全选
+            state.images.forEach(img => state.selectedIds.add(img.id));
+        }
+        updateSelectionUI();
+    });
+
+    // 导出
+    document.getElementById('export-btn').addEventListener('click', async () => {
+        if (state.selectedIds.size === 0) return;
+        await exportImages(Array.from(state.selectedIds));
+    });
+
+    // 批量删除
+    document.getElementById('delete-btn').addEventListener('click', async () => {
+        if (state.selectedIds.size === 0) return;
+
+        if (!confirm(`确定要删除选中的 ${state.selectedIds.size} 张图片吗？`)) {
+            return;
+        }
+
+        const result = await deleteImages(Array.from(state.selectedIds));
+        if (result && result.success) {
+            alert(result.message);
+            state.selectedIds.clear();
+            fetchImages();
+            fetchStats();
+        }
+    });
+
+    // 分页
+    document.getElementById('prev-page').addEventListener('click', () => {
+        if (state.currentPage > 1) {
+            state.currentPage--;
+            fetchImages();
+        }
+    });
+
+    document.getElementById('next-page').addEventListener('click', () => {
+        if (state.currentPage < state.totalPages) {
+            state.currentPage++;
+            fetchImages();
+        }
+    });
+
+    // 弹窗关闭
+    document.querySelector('.modal-close').addEventListener('click', closeImageDetail);
+    document.getElementById('detail-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'detail-modal') {
+            closeImageDetail();
+        }
+    });
+
+    // 下载按钮
+    document.getElementById('download-btn').addEventListener('click', async () => {
+        if (!state.currentImageId) return;
+        const image = await fetchImageDetail(state.currentImageId);
+        if (!image) return;
+
+        const a = document.createElement('a');
+        a.href = `/v1/files/image/${image.filename}`;
+        a.download = image.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    });
+
+    // 删除单张图片
+    document.getElementById('delete-single-btn').addEventListener('click', async () => {
+        if (!state.currentImageId) return;
+
+        if (!confirm('确定要删除这张图片吗？')) {
+            return;
+        }
+
+        const result = await deleteImages([state.currentImageId]);
+        if (result && result.success) {
+            alert(result.message);
+            closeImageDetail();
+            fetchImages();
+            fetchStats();
+        }
+    });
+
+    // 添加标签
+    document.getElementById('add-tag-btn').addEventListener('click', async () => {
+        await addTag();
+    });
+
+    document.getElementById('tag-input').addEventListener('keypress', async (e) => {
+        if (e.key === 'Enter') {
+            await addTag();
+        }
+    });
+
+    // 删除标签（事件委托）
+    document.getElementById('detail-tags').addEventListener('click', async (e) => {
+        if (e.target.classList.contains('tag-remove')) {
+            const tag = e.target.dataset.tag;
+            await removeTag(tag);
+        }
+    });
+}
+
+async function addTag() {
+    if (!state.currentImageId) return;
+
+    const input = document.getElementById('tag-input');
+    const tag = input.value.trim();
+
+    if (!tag) return;
+
+    const image = await fetchImageDetail(state.currentImageId);
+    if (!image) return;
+
+    const tags = image.tags || [];
+    if (tags.includes(tag)) {
+        alert('标签已存在');
+        return;
+    }
+
+    tags.push(tag);
+    const result = await updateTags(state.currentImageId, tags);
+
+    if (result && result.success) {
+        input.value = '';
+        showImageDetail(state.currentImageId);
+        fetchImages();
+    }
+}
+
+async function removeTag(tag) {
+    if (!state.currentImageId) return;
+
+    const image = await fetchImageDetail(state.currentImageId);
+    if (!image) return;
+
+    const tags = (image.tags || []).filter(t => t !== tag);
+    const result = await updateTags(state.currentImageId, tags);
+
+    if (result && result.success) {
+        showImageDetail(state.currentImageId);
+        fetchImages();
+    }
+}
+
+// 初始化
+document.addEventListener('DOMContentLoaded', () => {
+    initEventListeners();
+    fetchStats();
+    fetchImages();
+});

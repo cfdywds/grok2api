@@ -682,10 +682,36 @@ class DownloadService(BaseService):
         if file_path.exists():
             try:
                 file_path.unlink()
+
+                # 同步删除图片元数据
+                if media_type == "image":
+                    asyncio.create_task(self._delete_image_metadata(name))
+
                 return {"deleted": True}
             except Exception:
                 pass
         return {"deleted": False}
+
+    async def _delete_image_metadata(self, filename: str):
+        """异步删除图片元数据"""
+        try:
+            from app.services.gallery.service import get_image_metadata_service
+            service = get_image_metadata_service()
+
+            # 根据文件名查找并删除元数据
+            data = await service.storage.load_image_metadata()
+            images = data.get("images", [])
+
+            image_ids = [
+                img["id"] for img in images
+                if img.get("filename") == filename
+            ]
+
+            if image_ids:
+                await service.delete_images(image_ids)
+                logger.info(f"删除图片元数据: {filename}")
+        except Exception as e:
+            logger.error(f"删除图片元数据失败: {e}")
 
     def clear(self, media_type: str = "image") -> Dict[str, Any]:
         """清空缓存"""
@@ -705,7 +731,24 @@ class DownloadService(BaseService):
                 except Exception:
                     pass
 
+        # 同步清空图片元数据
+        if media_type == "image":
+            asyncio.create_task(self._clear_image_metadata())
+
         return {"count": count, "size_mb": round(total_size / 1024 / 1024, 2)}
+
+    async def _clear_image_metadata(self):
+        """异步清空图片元数据"""
+        try:
+            from app.services.gallery.service import get_image_metadata_service
+            service = get_image_metadata_service()
+
+            # 清空所有元数据
+            data = {"images": [], "version": "1.0"}
+            await service.storage.save_image_metadata(data)
+            logger.info("清空图片元数据")
+        except Exception as e:
+            logger.error(f"清空图片元数据失败: {e}")
 
     async def check_limit(self):
         """检查并清理缓存"""

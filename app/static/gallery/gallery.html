@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片管理 - Grok2API</title>
+    <link rel="stylesheet" href="/static/gallery/gallery.css">
+    <link rel="stylesheet" href="/static/common/common.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 导航栏 -->
+        <div id="header-container"></div>
+
+        <!-- 主容器 -->
+        <div class="container">
+            <!-- 统计卡片 -->
+            <div class="stats-container">
+                <div class="stat-card">
+                    <div class="stat-icon">📊</div>
+                    <div class="stat-content">
+                        <div class="stat-label">图片总数</div>
+                        <div class="stat-value" id="stat-total">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">💾</div>
+                    <div class="stat-content">
+                        <div class="stat-label">总大小</div>
+                        <div class="stat-value" id="stat-size">0 MB</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📅</div>
+                    <div class="stat-content">
+                        <div class="stat-label">本月新增</div>
+                        <div class="stat-value" id="stat-month">0</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🏷️</div>
+                    <div class="stat-content">
+                        <div class="stat-label">常用标签</div>
+                        <div class="stat-value" id="stat-tags">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 筛选工具栏 -->
+            <div class="toolbar">
+                <div class="toolbar-left">
+                    <input type="text" id="search-input" class="search-input" placeholder="搜索提示词...">
+                    <select id="model-filter" class="filter-select">
+                        <option value="">所有模型</option>
+                        <option value="grok-imagine-1.0">grok-imagine-1.0</option>
+                    </select>
+                    <select id="ratio-filter" class="filter-select">
+                        <option value="">所有比例</option>
+                        <option value="1:1">1:1</option>
+                        <option value="2:3">2:3</option>
+                        <option value="3:2">3:2</option>
+                        <option value="9:16">9:16</option>
+                        <option value="16:9">16:9</option>
+                    </select>
+                    <select id="sort-filter" class="filter-select">
+                        <option value="created_at:desc">最新优先</option>
+                        <option value="created_at:asc">最早优先</option>
+                        <option value="file_size:desc">大小降序</option>
+                        <option value="file_size:asc">大小升序</option>
+                    </select>
+                    <button id="filter-btn" class="btn btn-primary">筛选</button>
+                    <button id="reset-btn" class="btn btn-secondary">重置</button>
+                </div>
+                <div class="toolbar-right">
+                    <button id="view-grid" class="btn btn-icon active" title="网格视图">
+                        <span>⊞</span>
+                    </button>
+                    <button id="view-list" class="btn btn-icon" title="列表视图">
+                        <span>☰</span>
+                    </button>
+                    <button id="select-all" class="btn btn-secondary">全选</button>
+                    <button id="export-btn" class="btn btn-primary" disabled>导出</button>
+                    <button id="delete-btn" class="btn btn-danger" disabled>删除</button>
+                </div>
+            </div>
+
+            <!-- 图片容器 -->
+            <div id="images-container" class="images-grid">
+                <!-- 图片将通过 JavaScript 动态加载 -->
+            </div>
+
+            <!-- 加载状态 -->
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>加载中...</p>
+            </div>
+
+            <!-- 空状态 -->
+            <div id="empty-state" class="empty-state" style="display: none;">
+                <div class="empty-icon">🖼️</div>
+                <p>暂无图片</p>
+            </div>
+
+            <!-- 分页 -->
+            <div class="pagination" id="pagination" style="display: none;">
+                <button id="prev-page" class="btn btn-secondary" disabled>上一页</button>
+                <span id="page-info">第 1 页 / 共 1 页</span>
+                <button id="next-page" class="btn btn-secondary" disabled>下一页</button>
+            </div>
+        </div>
+
+        <!-- 图片详情弹窗 -->
+        <div id="detail-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span class="modal-close">&times;</span>
+                <div class="modal-body">
+                    <div class="modal-image">
+                        <img id="detail-image" src="" alt="图片">
+                    </div>
+                    <div class="modal-info">
+                        <h3>图片详情</h3>
+                        <div class="info-group">
+                            <label>提示词：</label>
+                            <p id="detail-prompt"></p>
+                        </div>
+                        <div class="info-group">
+                            <label>模型：</label>
+                            <p id="detail-model"></p>
+                        </div>
+                        <div class="info-group">
+                            <label>宽高比：</label>
+                            <p id="detail-ratio"></p>
+                        </div>
+                        <div class="info-group">
+                            <label>尺寸：</label>
+                            <p id="detail-size"></p>
+                        </div>
+                        <div class="info-group">
+                            <label>文件大小：</label>
+                            <p id="detail-filesize"></p>
+                        </div>
+                        <div class="info-group">
+                            <label>创建时间：</label>
+                            <p id="detail-time"></p>
+                        </div>
+                        <div class="info-group">
+                            <label>标签：</label>
+                            <div id="detail-tags" class="tags-container"></div>
+                        </div>
+                        <div class="info-group">
+                            <label>添加标签：</label>
+                            <div class="tag-input-group">
+                                <input type="text" id="tag-input" placeholder="输入标签，按回车添加">
+                                <button id="add-tag-btn" class="btn btn-primary btn-sm">添加</button>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button id="download-btn" class="btn btn-primary">下载</button>
+                            <button id="delete-single-btn" class="btn btn-danger">删除</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/gallery/gallery.js"></script>
+    <script>
+        // 加载导航栏
+        fetch('/static/common/header.html')
+            .then(response => response.text())
+            .then(html => {
+                document.getElementById('header-container').innerHTML = html;
+            });
+    </script>
+</body>
+</html>

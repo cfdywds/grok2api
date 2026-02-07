@@ -8,6 +8,7 @@ import math
 import random
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -30,6 +31,8 @@ from app.services.token import get_token_manager, EffortType
 from app.core.exceptions import ValidationException, AppException, ErrorType
 from app.core.config import get_config
 from app.core.logger import logger
+from app.services.gallery import ImageMetadata
+from app.services.gallery.service import get_image_metadata_service
 
 
 router = APIRouter(tags=["Images"])
@@ -288,6 +291,93 @@ async def call_grok(
                 logger.warning(f"Failed to consume token: {e}")
 
 
+async def _save_image_metadata(
+    selected_images: List[str],
+    prompt: str,
+    model: str,
+    aspect_ratio: str,
+    response_format: str,
+):
+    """
+    异步保存图片元数据
+
+    Args:
+        selected_images: 生成的图片列表（base64 或 URL）
+        prompt: 提示词
+        model: 模型名称
+        aspect_ratio: 宽高比
+        response_format: 响应格式
+    """
+    try:
+        service = get_image_metadata_service()
+        image_dir = Path(__file__).parent.parent.parent.parent / "data" / "tmp" / "image"
+        image_dir.mkdir(parents=True, exist_ok=True)
+
+        for img_data in selected_images:
+            if img_data == "error" or not img_data:
+                continue
+
+            try:
+                # 生成唯一 ID
+                image_id = str(uuid.uuid4())
+                filename = f"{image_id}.jpg"
+                file_path = image_dir / filename
+
+                # 保存图片文件
+                if response_format == "url":
+                    # URL 格式，跳过（已经保存在服务器上）
+                    continue
+                else:
+                    # base64 格式，解码并保存
+                    image_bytes = base64.b64decode(img_data)
+                    file_path.write_bytes(image_bytes)
+
+                # 获取文件信息
+                file_size = file_path.stat().st_size if file_path.exists() else 0
+
+                # 解析宽高比
+                width, height = 1024, 1024
+                if aspect_ratio:
+                    try:
+                        w_str, h_str = aspect_ratio.split(":")
+                        ratio = int(w_str) / int(h_str)
+                        if ratio > 1:
+                            width = 1536
+                            height = int(1536 / ratio)
+                        elif ratio < 1:
+                            height = 1536
+                            width = int(1536 * ratio)
+                    except Exception:
+                        pass
+
+                # 创建元数据
+                metadata = ImageMetadata(
+                    id=image_id,
+                    filename=filename,
+                    prompt=prompt,
+                    model=model,
+                    aspect_ratio=aspect_ratio or "1:1",
+                    created_at=int(time.time() * 1000),
+                    file_size=file_size,
+                    width=width,
+                    height=height,
+                    tags=[],
+                    nsfw=False,
+                    metadata={},
+                )
+
+                # 保存元数据
+                await service.add_image(metadata)
+                logger.info(f"保存图片元数据成功: {image_id}")
+
+            except Exception as e:
+                logger.error(f"保存单张图片元数据失败: {e}")
+                continue
+
+    except Exception as e:
+        logger.error(f"保存图片元数据失败: {e}")
+
+
 @router.post("/images/generations")
 async def create_image(request: ImageGenerationRequest):
     """
@@ -480,6 +570,15 @@ async def create_image(request: ImageGenerationRequest):
         "output_tokens": 0,
         "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
     }
+
+    # 异步保存元数据
+    asyncio.create_task(_save_image_metadata(
+        selected_images=selected_images,
+        prompt=request.prompt,
+        model=request.model,
+        aspect_ratio=resolve_aspect_ratio(request.size) if use_ws else "1:1",
+        response_format=response_format,
+    ))
 
     return JSONResponse(
         content={
