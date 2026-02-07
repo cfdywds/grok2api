@@ -20,6 +20,7 @@ const state = {
         hasQualityIssues: null,
     },
     currentImageId: null,
+    currentImageIndex: -1, // 当前图片在列表中的索引
 };
 
 // API 基础路径
@@ -449,6 +450,8 @@ async function showImageDetail(imageId) {
     if (!image) return;
 
     state.currentImageId = imageId;
+    // 找到当前图片在列表中的索引
+    state.currentImageIndex = state.images.findIndex(img => img.id === imageId);
 
     const modal = document.getElementById('detail-modal');
     document.getElementById('detail-image').src = `/v1/files/image/${image.filename}`;
@@ -508,12 +511,52 @@ async function showImageDetail(imageId) {
         });
     }
 
+    // 更新导航按钮状态
+    updateNavigationButtons();
+
     modal.style.display = 'flex';
 }
 
 function closeImageDetail() {
     document.getElementById('detail-modal').style.display = 'none';
     state.currentImageId = null;
+    state.currentImageIndex = -1;
+}
+
+// 显示上一张图片
+function showPreviousImage() {
+    if (state.currentImageIndex > 0) {
+        const prevImage = state.images[state.currentImageIndex - 1];
+        showImageDetail(prevImage.id);
+    }
+}
+
+// 显示下一张图片
+function showNextImage() {
+    if (state.currentImageIndex < state.images.length - 1) {
+        const nextImage = state.images[state.currentImageIndex + 1];
+        showImageDetail(nextImage.id);
+    }
+}
+
+// 更新导航按钮状态
+function updateNavigationButtons() {
+    const prevBtn = document.getElementById('prev-image-btn');
+    const nextBtn = document.getElementById('next-image-btn');
+
+    // 禁用/启用上一张按钮
+    if (state.currentImageIndex <= 0) {
+        prevBtn.disabled = true;
+    } else {
+        prevBtn.disabled = false;
+    }
+
+    // 禁用/启用下一张按钮
+    if (state.currentImageIndex >= state.images.length - 1) {
+        nextBtn.disabled = true;
+    } else {
+        nextBtn.disabled = false;
+    }
 }
 
 function escapeHtml(text) {
@@ -666,6 +709,24 @@ function initEventListeners() {
     document.getElementById('detail-modal').addEventListener('click', (e) => {
         if (e.target.id === 'detail-modal') {
             closeImageDetail();
+        }
+    });
+
+    // 导航按钮
+    document.getElementById('prev-image-btn').addEventListener('click', showPreviousImage);
+    document.getElementById('next-image-btn').addEventListener('click', showNextImage);
+
+    // 键盘导航
+    document.addEventListener('keydown', (e) => {
+        const modal = document.getElementById('detail-modal');
+        if (modal.style.display === 'flex') {
+            if (e.key === 'ArrowLeft') {
+                showPreviousImage();
+            } else if (e.key === 'ArrowRight') {
+                showNextImage();
+            } else if (e.key === 'Escape') {
+                closeImageDetail();
+            }
         }
     });
 

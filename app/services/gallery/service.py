@@ -563,6 +563,12 @@ class ImageMetadataService:
         """
         分析单张图片的质量
 
+        优化后的评分策略：
+        - 模糊度：使用拉普拉斯方差，阈值调整为更合理的范围
+        - 对比度：使用标准差，归一化到0-100
+        - 亮度：检测是否在合理范围内
+        - 综合评分：调整权重，避免过度惩罚
+
         Args:
             image_id: 图片ID
 
@@ -596,45 +602,57 @@ class ImageMetadataService:
 
             # 1. 模糊度检测（拉普拉斯方差）
             laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-            # 归一化到0-100，通常清晰图片的方差 > 100
-            blur_score = min(100, laplacian_var / 10)
+            # 优化归一化：使用更合理的阈值
+            # 通常：< 50 模糊，50-200 一般，> 200 清晰
+            if laplacian_var < 50:
+                blur_score = laplacian_var / 50 * 40  # 0-40分
+            elif laplacian_var < 200:
+                blur_score = 40 + (laplacian_var - 50) / 150 * 40  # 40-80分
+            else:
+                blur_score = 80 + min(20, (laplacian_var - 200) / 100 * 20)  # 80-100分
+            blur_score = max(0, min(100, blur_score))
 
             # 2. 亮度检测
             brightness = np.mean(gray)
-            # 归一化到0-100，50为正常
             brightness_score = brightness / 255 * 100
 
-            # 3. 对比度检测
+            # 3. 对比度检测（修复）
             contrast = gray.std()
-            # 归一化，通常对比度 > 30 为正常
-            contrast_score = min(100, contrast / 0.5)
+            # 优化归一化：标准差通常在 0-80 之间
+            # < 20 低对比度，20-50 正常，> 50 高对比度
+            if contrast < 20:
+                contrast_score = contrast / 20 * 50  # 0-50分
+            elif contrast < 50:
+                contrast_score = 50 + (contrast - 20) / 30 * 30  # 50-80分
+            else:
+                contrast_score = 80 + min(20, (contrast - 50) / 30 * 20)  # 80-100分
+            contrast_score = max(0, min(100, contrast_score))
 
             # 4. 综合质量评分
             quality_issues = []
 
-            # 极度模糊检测（阈值：20，针对马赛克、完全看不清的情况）
+            # 模糊度问题检测（调整阈值）
             if blur_score < 20:
                 quality_issues.append("极度模糊")
-            # 严重模糊检测（阈值：35）
-            elif blur_score < 35:
+            elif blur_score < 40:
                 quality_issues.append("严重模糊")
 
-            # 极度过暗检测（阈值：10，几乎全黑）
-            if brightness_score < 10:
+            # 亮度问题检测
+            if brightness_score < 15:
                 quality_issues.append("极度过暗")
-            # 极度过亮检测（阈值：90，几乎全白）
-            elif brightness_score > 90:
+            elif brightness_score > 85:
                 quality_issues.append("极度过亮")
 
-            # 极低对比度检测（阈值：25，图片发灰严重）
-            if contrast_score < 25:
+            # 对比度问题检测（调整阈值）
+            if contrast_score < 30:
                 quality_issues.append("极低对比度")
 
-            # 计算综合评分（加权平均，模糊度权重大幅提高）
+            # 计算综合评分（优化权重）
+            # 模糊度最重要，但不要过度惩罚
             quality_score = (
-                blur_score * 0.7 +  # 模糊度权重大幅提高，主要筛选看不清的图片
-                contrast_score * 0.2 +  # 对比度权重降低
-                (100 - abs(brightness_score - 50) * 2) * 0.1  # 亮度权重降低
+                blur_score * 0.5 +  # 模糊度权重 50%
+                contrast_score * 0.3 +  # 对比度权重 30%
+                (100 - abs(brightness_score - 50) * 1.5) * 0.2  # 亮度权重 20%
             )
             quality_score = max(0, min(100, quality_score))
 
