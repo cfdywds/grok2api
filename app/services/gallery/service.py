@@ -3,14 +3,27 @@
 """
 
 import os
+import sys
 import asyncio
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.core.storage import get_storage
 from app.core.logger import logger
 from .models import ImageMetadata, ImageListResponse, ImageFilter, ImageStats
+
+# 添加项目根目录到路径，以便导入 advanced_image_analyzer
+project_root = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+try:
+    from advanced_image_analyzer import AdvancedImageQualityAnalyzer
+    ADVANCED_ANALYZER_AVAILABLE = True
+except ImportError:
+    ADVANCED_ANALYZER_AVAILABLE = False
+    logger.warning("高级图片分析器不可用，将使用基础分析器")
 
 
 class ImageMetadataService:
@@ -19,6 +32,25 @@ class ImageMetadataService:
     def __init__(self):
         self.storage = get_storage()
         self.image_dir = Path(__file__).parent.parent.parent.parent / "data" / "tmp" / "image"
+
+        # 初始化高级图片分析器（懒加载）
+        self._analyzer = None
+
+    def _get_analyzer(self):
+        """获取分析器实例（懒加载）"""
+        if self._analyzer is None and ADVANCED_ANALYZER_AVAILABLE:
+            try:
+                self._analyzer = AdvancedImageQualityAnalyzer(use_clip=True)
+                logger.info("[OK] 高级图片分析器初始化成功（CLIP + OpenCV）")
+            except Exception as e:
+                logger.warning(f"CLIP 模型加载失败，使用轻量级模式: {e}")
+                try:
+                    self._analyzer = AdvancedImageQualityAnalyzer(use_clip=False)
+                    logger.info("[OK] 轻量级图片分析器初始化成功（纯 OpenCV）")
+                except Exception as e2:
+                    logger.error(f"图片分析器初始化失败: {e2}")
+                    self._analyzer = None
+        return self._analyzer
 
     async def add_image(self, metadata: ImageMetadata) -> bool:
         """
@@ -120,6 +152,13 @@ class ImageMetadataService:
             page_images = images[start:end]
 
             logger.info(f"分页后: total={total}, page_images={len(page_images)}")
+
+            # 添加文件路径信息
+            for img in page_images:
+                # 添加完整文件路径
+                img["file_path"] = str(self.image_dir / img["filename"])
+                # 添加相对路径（更友好）
+                img["relative_path"] = f"data/tmp/image/{img['filename']}"
 
             # 转换为模型
             image_models = [ImageMetadata(**img) for img in page_images]
@@ -561,111 +600,109 @@ class ImageMetadataService:
 
     async def analyze_image_quality(self, image_id: str) -> Optional[Dict[str, Any]]:
         """
-        分析单张图片的质量
+        分析单张图片的质量（增强版）
 
-        优化后的评分策略：
-        - 模糊度：使用拉普拉斯方差，阈值调整为更合理的范围
-        - 对比度：使用标准差，归一化到0-100
-        - 亮度：检测是否在合理范围内
-        - 综合评分：调整权重，避免过度惩罚
+        使用 CLIP + OpenCV 混合方案，可以：
+        - 检测技术质量（清晰度、亮度、对比度、噪点等）
+        - 识别内容合理性（构图、光影、色彩等）
+        - 检测 AI 生成缺陷（手部、面部、文字等）
 
         Args:
             image_id: 图片ID
 
         Returns:
-            质量分析结果，包含 quality_score, blur_score, brightness_score, quality_issues
+            质量分析结果
         """
         try:
-            import cv2
-            import numpy as np
-
             # 获取图片元数据
             metadata = await self.get_image(image_id)
             if not metadata:
                 logger.error(f"图片不存在: {image_id}")
                 return None
 
-            # 读取图片文件
+            # 检查文件是否存在
             file_path = self.image_dir / metadata.filename
             if not file_path.exists():
                 logger.error(f"图片文件不存在: {file_path}")
                 return None
 
-            # 使用OpenCV读取图片
-            img = cv2.imread(str(file_path))
-            if img is None:
-                logger.error(f"无法读取图片: {file_path}")
-                return None
+            # 获取分析器
+            analyzer = self._get_analyzer()
 
-            # 转换为灰度图
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            if analyzer:
+                # 使用高级分析器
+                result = analyzer.comprehensive_analysis(str(file_path))
 
-            # 1. 模糊度检测（拉普拉斯方差）
-            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-            # 优化归一化：使用更合理的阈值
-            # 通常：< 50 模糊，50-200 一般，> 200 清晰
-            if laplacian_var < 50:
-                blur_score = laplacian_var / 50 * 40  # 0-40分
-            elif laplacian_var < 200:
-                blur_score = 40 + (laplacian_var - 50) / 150 * 40  # 40-80分
+                # 格式化结果
+                return {
+                    "quality_score": result["final_score"],
+                    "grade": result["grade"],
+                    "blur_score": result["technical"].get("sharpness", 0),
+                    "brightness_score": result["technical"].get("brightness", 0),
+                    "contrast_score": result["technical"].get("contrast", 0),
+                    "quality_issues": result["issues"],
+                    "technical_scores": result["technical"],
+                    "content_scores": result.get("content", {}),
+                    "defect_scores": result.get("defects", {}),
+                    "using_clip": result.get("using_clip", False)
+                }
             else:
-                blur_score = 80 + min(20, (laplacian_var - 200) / 100 * 20)  # 80-100分
-            blur_score = max(0, min(100, blur_score))
+                # 降级到基础 OpenCV 分析
+                import cv2
+                import numpy as np
 
-            # 2. 亮度检测
-            brightness = np.mean(gray)
-            brightness_score = brightness / 255 * 100
+                img = cv2.imread(str(file_path))
+                if img is None:
+                    logger.error(f"无法读取图片: {file_path}")
+                    return None
 
-            # 3. 对比度检测（修复）
-            contrast = gray.std()
-            # 优化归一化：标准差通常在 0-80 之间
-            # < 20 低对比度，20-50 正常，> 50 高对比度
-            if contrast < 20:
-                contrast_score = contrast / 20 * 50  # 0-50分
-            elif contrast < 50:
-                contrast_score = 50 + (contrast - 20) / 30 * 30  # 50-80分
-            else:
-                contrast_score = 80 + min(20, (contrast - 50) / 30 * 20)  # 80-100分
-            contrast_score = max(0, min(100, contrast_score))
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-            # 4. 综合质量评分
-            quality_issues = []
+                # 基础分析
+                laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+                if laplacian_var < 50:
+                    blur_score = laplacian_var / 50 * 40
+                elif laplacian_var < 200:
+                    blur_score = 40 + (laplacian_var - 50) / 150 * 40
+                else:
+                    blur_score = 80 + min(20, (laplacian_var - 200) / 100 * 20)
+                blur_score = max(0, min(100, blur_score))
 
-            # 模糊度问题检测（调整阈值）
-            if blur_score < 20:
-                quality_issues.append("极度模糊")
-            elif blur_score < 40:
-                quality_issues.append("严重模糊")
+                brightness = np.mean(gray)
+                brightness_score = brightness / 255 * 100
 
-            # 亮度问题检测
-            if brightness_score < 15:
-                quality_issues.append("极度过暗")
-            elif brightness_score > 85:
-                quality_issues.append("极度过亮")
+                contrast = gray.std()
+                if contrast < 20:
+                    contrast_score = contrast / 20 * 50
+                elif contrast < 50:
+                    contrast_score = 50 + (contrast - 20) / 30 * 30
+                else:
+                    contrast_score = 80 + min(20, (contrast - 50) / 30 * 20)
+                contrast_score = max(0, min(100, contrast_score))
 
-            # 对比度问题检测（调整阈值）
-            if contrast_score < 30:
-                quality_issues.append("极低对比度")
+                quality_issues = []
+                if blur_score < 40:
+                    quality_issues.append("图片模糊")
+                if brightness_score < 15 or brightness_score > 85:
+                    quality_issues.append("亮度异常")
+                if contrast_score < 30:
+                    quality_issues.append("对比度过低")
 
-            # 计算综合评分（优化权重）
-            # 模糊度最重要，但不要过度惩罚
-            quality_score = (
-                blur_score * 0.5 +  # 模糊度权重 50%
-                contrast_score * 0.3 +  # 对比度权重 30%
-                (100 - abs(brightness_score - 50) * 1.5) * 0.2  # 亮度权重 20%
-            )
-            quality_score = max(0, min(100, quality_score))
+                quality_score = (
+                    blur_score * 0.5 +
+                    contrast_score * 0.3 +
+                    (100 - abs(brightness_score - 50) * 1.5) * 0.2
+                )
+                quality_score = max(0, min(100, quality_score))
 
-            result = {
-                "quality_score": float(round(quality_score, 2)),
-                "blur_score": float(round(blur_score, 2)),
-                "brightness_score": float(round(brightness_score, 2)),
-                "contrast_score": float(round(contrast_score, 2)),
-                "quality_issues": quality_issues
-            }
-
-            logger.info(f"图片质量分析完成: {image_id}, 评分: {quality_score:.2f}")
-            return result
+                return {
+                    "quality_score": float(round(quality_score, 2)),
+                    "blur_score": float(round(blur_score, 2)),
+                    "brightness_score": float(round(brightness_score, 2)),
+                    "contrast_score": float(round(contrast_score, 2)),
+                    "quality_issues": quality_issues,
+                    "using_clip": False
+                }
 
         except Exception as e:
             logger.error(f"分析图片质量失败 {image_id}: {e}")
@@ -675,7 +712,9 @@ class ImageMetadataService:
         self,
         image_ids: Optional[List[str]] = None,
         update_metadata: bool = True,
-        batch_size: int = 50
+        batch_size: int = 50,
+        skip_analyzed: bool = False,
+        max_workers: int = 8
     ) -> Dict[str, Any]:
         """
         批量分析图片质量
@@ -684,6 +723,8 @@ class ImageMetadataService:
             image_ids: 图片ID列表，为None时分析所有图片
             update_metadata: 是否更新元数据
             batch_size: 批处理大小
+            skip_analyzed: 是否跳过已分析的图片
+            max_workers: 并发线程数（1-16）
 
         Returns:
             分析结果统计
@@ -695,32 +736,56 @@ class ImageMetadataService:
                 all_images = data.get("images", [])
                 image_ids = [img["id"] for img in all_images]
 
+            original_total = len(image_ids)
+
+            # 如果启用跳过模式，过滤掉已分析的图片
+            if skip_analyzed:
+                data = await self.storage.load_image_metadata()
+                all_images = {img["id"]: img for img in data.get("images", [])}
+                image_ids = [
+                    img_id for img_id in image_ids
+                    if img_id in all_images and
+                       all_images[img_id].get("quality_score") is None
+                ]
+                logger.info(f"跳过模式：需分析 {len(image_ids)} 张图片（已过滤 {original_total - len(image_ids)} 张）")
+
             total = len(image_ids)
             analyzed = 0
             failed = 0
             low_quality_count = 0
 
-            logger.info(f"开始批量分析图片质量: 共 {total} 张")
+            logger.info(f"开始批量分析图片质量: 共 {total} 张，并发数 {max_workers}")
 
             # 分批处理
             for i in range(0, total, batch_size):
                 batch_ids = image_ids[i:i + batch_size]
 
-                for image_id in batch_ids:
-                    result = await self.analyze_image_quality(image_id)
+                # 使用线程池并行处理
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # 提交所有任务
+                    future_to_id = {
+                        executor.submit(self._analyze_image_sync, img_id): img_id
+                        for img_id in batch_ids
+                    }
 
-                    if result:
-                        analyzed += 1
+                    # 收集结果
+                    for future in as_completed(future_to_id):
+                        img_id = future_to_id[future]
+                        try:
+                            result = future.result()
+                            if result:
+                                analyzed += 1
+                                if result["quality_score"] < 60:
+                                    low_quality_count += 1
 
-                        # 统计低质量图片（评分 < 60）
-                        if result["quality_score"] < 60:
-                            low_quality_count += 1
-
-                        # 更新元数据
-                        if update_metadata:
-                            await self._update_quality_metadata(image_id, result)
-                    else:
-                        failed += 1
+                                # 更新元数据
+                                if update_metadata:
+                                    await self._update_quality_metadata(img_id, result)
+                            else:
+                                failed += 1
+                        except Exception as e:
+                            logger.error(f"分析图片失败 {img_id}: {e}")
+                            failed += 1
 
                 # 记录进度
                 progress = (i + len(batch_ids)) / total * 100
@@ -758,6 +823,27 @@ class ImageMetadataService:
             是否更新成功
         """
         try:
+            import numpy as np
+
+            # 转换 NumPy 类型为 Python 原生类型
+            def convert_to_native(obj):
+                """递归转换 NumPy 类型为 Python 原生类型"""
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, dict):
+                    return {key: convert_to_native(value) for key, value in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_to_native(item) for item in obj]
+                else:
+                    return obj
+
+            # 转换质量结果中的所有值
+            quality_result = convert_to_native(quality_result)
+
             async with self.storage.acquire_lock("image_metadata", timeout=10):
                 data = await self.storage.load_image_metadata()
                 images = data.get("images", [])
@@ -783,6 +869,45 @@ class ImageMetadataService:
         except Exception as e:
             logger.error(f"更新质量元数据失败 {image_id}: {e}")
             return False
+
+    def _analyze_image_sync(self, image_id: str) -> Optional[Dict[str, Any]]:
+        """
+        线程池执行的同步包装器
+        为每个线程创建独立的事件循环来执行异步操作
+        """
+        try:
+            # 为线程创建新的事件循环
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # 获取图片元数据
+                metadata = loop.run_until_complete(self.get_image(image_id))
+            finally:
+                loop.close()
+
+            if not metadata:
+                return None
+
+            # 检查文件存在性
+            file_path = self.image_dir / metadata.filename
+            if not file_path.exists():
+                logger.warning(f"图片文件不存在: {file_path}")
+                return None
+
+            # 执行分析（CPU 密集型操作）
+            analyzer = self._get_analyzer()
+            if analyzer:
+                result = analyzer.comprehensive_analysis(str(file_path))
+                return {
+                    "quality_score": result["final_score"],
+                    "blur_score": result["technical"].get("sharpness", 0),
+                    "brightness_score": result["technical"].get("brightness", 0),
+                    "quality_issues": result["issues"]
+                }
+            return None
+        except Exception as e:
+            logger.error(f"同步分析失败 {image_id}: {e}")
+            return None
 
     async def import_image(self, source_path: str, tags: Optional[List[str]] = None) -> Optional[str]:
         """

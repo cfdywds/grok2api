@@ -10,6 +10,9 @@
 </head>
 <body>
     <div id="app">
+        <!-- Toast 通知容器 -->
+        <div id="toast-container" class="toast-container"></div>
+
         <!-- 导航栏 -->
         <div id="header-container"></div>
 
@@ -89,6 +92,9 @@
                     <button id="analyze-btn" class="btn btn-warning" title="分析图片质量">
                         <span>🔍</span> 质量分析
                     </button>
+                    <button id="analyze-options-btn" class="btn btn-secondary" title="配置分析选项">
+                        <span>⚙️</span> 分析选项
+                    </button>
                     <button id="scan-btn" class="btn btn-primary" title="扫描本地图片文件夹">
                         <span>🔄</span> 同步本地
                     </button>
@@ -149,6 +155,63 @@
             </div>
         </div>
 
+        <!-- 分析选项弹窗 -->
+        <div id="analysis-options-modal" class="modal" style="display: none;">
+            <div class="modal-content" style="max-width: 500px;">
+                <span class="modal-close" id="close-analysis-options">&times;</span>
+                <div class="modal-body">
+                    <h3>图片质量分析选项</h3>
+
+                    <!-- 分析模式 -->
+                    <div class="option-group">
+                        <label class="option-label">分析模式：</label>
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="analysis-mode" value="all" checked>
+                                <span>
+                                    <strong>全量分析</strong>
+                                    <small>分析所有图片（包括已分析过的）</small>
+                                </span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="analysis-mode" value="skip">
+                                <span>
+                                    <strong>增量分析</strong>
+                                    <small>仅分析未分析过的图片</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 并发数 -->
+                    <div class="option-group">
+                        <label class="option-label">
+                            并发线程数：<span id="worker-count-display" class="value-display">8</span>
+                        </label>
+                        <input type="range" id="worker-count-slider"
+                               min="4" max="16" value="8" step="4" class="slider">
+                        <div class="slider-labels">
+                            <span>4（较慢，低资源）</span>
+                            <span>16（较快，高资源）</span>
+                        </div>
+                    </div>
+
+                    <!-- 预估时间 -->
+                    <div class="option-group">
+                        <label class="option-label">预计耗时：</label>
+                        <div id="estimated-time" class="value-display">计算中...</div>
+                        <div class="help-text">基于当前选择的模式和并发数估算</div>
+                    </div>
+
+                    <!-- 操作按钮 -->
+                    <div class="modal-actions">
+                        <button id="start-analysis-btn" class="btn btn-primary">开始分析</button>
+                        <button id="cancel-analysis-options-btn" class="btn btn-secondary">取消</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- 图片详情弹窗 -->
         <div id="detail-modal" class="modal" style="display: none;">
             <div class="modal-content">
@@ -190,6 +253,15 @@
                             <label>创建时间：</label>
                             <p id="detail-time"></p>
                         </div>
+                        <div class="info-group">
+                            <label>文件位置：</label>
+                            <div class="file-path-container">
+                                <input type="text" id="detail-file-path" readonly class="file-path-input">
+                                <button id="copy-path-btn" class="btn-icon" title="复制路径">
+                                    <span>📋</span>
+                                </button>
+                            </div>
+                        </div>
                         <div class="info-group" id="quality-info" style="display: none;">
                             <label>质量评分：</label>
                             <div class="quality-info">
@@ -225,7 +297,7 @@
         </div>
     </div>
 
-    <script src="/static/gallery/gallery.js?v=1.1.1"></script>
+    <script src="/static/gallery/gallery.js?v=1.2.1"></script>
     <script>
         // 加载导航栏
         fetch('/static/common/header.html')

@@ -21,10 +21,143 @@ const state = {
     },
     currentImageId: null,
     currentImageIndex: -1, // 当前图片在列表中的索引
+    analysisState: {
+        mode: 'all',        // 'all' 或 'skip'
+        maxWorkers: 8       // 4-16
+    },
 };
 
 // API 基础路径
 const API_BASE = '/api/v1/admin/gallery';
+
+// Toast 通知系统
+const Toast = {
+    show(message, type = 'info', title = '', duration = 3000) {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+
+        const icons = {
+            success: '✓',
+            error: '✕',
+            warning: '⚠',
+            info: 'ℹ'
+        };
+
+        const titles = {
+            success: title || '成功',
+            error: title || '错误',
+            warning: title || '警告',
+            info: title || '提示'
+        };
+
+        toast.innerHTML = `
+            <div class="toast-icon">${icons[type]}</div>
+            <div class="toast-content">
+                <div class="toast-title">${titles[type]}</div>
+                <div class="toast-message">${message}</div>
+            </div>
+            <div class="toast-close">×</div>
+        `;
+
+        container.appendChild(toast);
+
+        // 关闭按钮
+        toast.querySelector('.toast-close').addEventListener('click', () => {
+            this.remove(toast);
+        });
+
+        // 自动关闭
+        if (duration > 0) {
+            setTimeout(() => {
+                this.remove(toast);
+            }, duration);
+        }
+
+        return toast;
+    },
+
+    remove(toast) {
+        toast.style.animation = 'slideIn 0.3s ease reverse';
+        setTimeout(() => {
+            toast.remove();
+        }, 300);
+    },
+
+    success(message, title = '') {
+        return this.show(message, 'success', title);
+    },
+
+    error(message, title = '') {
+        return this.show(message, 'error', title);
+    },
+
+    warning(message, title = '') {
+        return this.show(message, 'warning', title);
+    },
+
+    info(message, title = '') {
+        return this.show(message, 'info', title);
+    }
+};
+
+// 自定义确认对话框
+const ConfirmDialog = {
+    show(options) {
+        return new Promise((resolve) => {
+            const {
+                title = '确认操作',
+                message = '确定要执行此操作吗？',
+                icon = '❓',
+                confirmText = '确定',
+                cancelText = '取消',
+                confirmClass = 'btn-danger'
+            } = options;
+
+            const dialog = document.createElement('div');
+            dialog.className = 'confirm-dialog';
+            dialog.innerHTML = `
+                <div class="confirm-dialog-content">
+                    <div class="confirm-dialog-icon">${icon}</div>
+                    <div class="confirm-dialog-title">${title}</div>
+                    <div class="confirm-dialog-message">${message}</div>
+                    <div class="confirm-dialog-actions">
+                        <button class="btn btn-secondary cancel-btn">${cancelText}</button>
+                        <button class="btn ${confirmClass} confirm-btn">${confirmText}</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(dialog);
+
+            const confirmBtn = dialog.querySelector('.confirm-btn');
+            const cancelBtn = dialog.querySelector('.cancel-btn');
+
+            const close = (result) => {
+                dialog.style.animation = 'fadeIn 0.2s ease reverse';
+                setTimeout(() => {
+                    dialog.remove();
+                    resolve(result);
+                }, 200);
+            };
+
+            confirmBtn.addEventListener('click', () => close(true));
+            cancelBtn.addEventListener('click', () => close(false));
+            dialog.addEventListener('click', (e) => {
+                if (e.target === dialog) close(false);
+            });
+
+            // ESC 键关闭
+            const escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    close(false);
+                    document.removeEventListener('keydown', escHandler);
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+        });
+    }
+};
 
 // 工具函数
 function formatFileSize(bytes) {
@@ -149,9 +282,11 @@ async function exportImages(imageIds) {
         a.click();
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
+
+        Toast.success('图片导出成功');
     } catch (error) {
         console.error('导出图片失败:', error);
-        alert('导出失败，请重试');
+        Toast.error('导出失败，请重试');
     }
 }
 
@@ -164,15 +299,15 @@ async function scanLocalImages() {
         const data = await response.json();
 
         if (data.success) {
-            alert(data.message);
+            Toast.success(data.message);
             fetchImages();
             fetchStats();
         } else {
-            alert('扫描失败，请重试');
+            Toast.error('扫描失败，请重试');
         }
     } catch (error) {
         console.error('扫描本地图片失败:', error);
-        alert('扫描失败，请重试');
+        Toast.error('扫描失败，请重试');
     } finally {
         hideLoading();
     }
@@ -188,20 +323,23 @@ async function analyzeQuality(imageIds = null) {
                 image_ids: imageIds,
                 update_metadata: true,
                 batch_size: 50,
+                skip_analyzed: state.analysisState.mode === 'skip',
+                max_workers: state.analysisState.maxWorkers
             }),
         });
         const data = await response.json();
 
         if (data.success) {
-            alert(data.message);
+            const mode = state.analysisState.mode === 'skip' ? '增量' : '全量';
+            Toast.success(`${mode}分析完成：${data.message}`);
             fetchImages();
             fetchStats();
         } else {
-            alert('分析失败，请重试');
+            Toast.error('分析失败，请重试');
         }
     } catch (error) {
         console.error('分析图片质量失败:', error);
-        alert('分析失败，请重试');
+        Toast.error('分析失败，请重试');
     } finally {
         hideLoading();
     }
@@ -237,13 +375,17 @@ async function uploadImages(files) {
             }
         }
 
-        alert(`上传完成: 成功 ${successCount}, 失败 ${failCount}`);
+        if (failCount === 0) {
+            Toast.success(`成功上传 ${successCount} 张图片`);
+        } else {
+            Toast.warning(`上传完成: 成功 ${successCount} 张，失败 ${failCount} 张`);
+        }
         fetchImages();
         fetchStats();
         toggleUploadArea(false);
     } catch (error) {
         console.error('上传图片失败:', error);
-        alert('上传失败，请重试');
+        Toast.error('上传失败，请重试');
     } finally {
         hideLoading();
     }
@@ -476,6 +618,10 @@ async function showImageDetail(imageId) {
     document.getElementById('detail-filesize').textContent = formatFileSize(image.file_size);
     document.getElementById('detail-time').textContent = formatDate(image.created_at);
 
+    // 显示文件路径
+    const filePathInput = document.getElementById('detail-file-path');
+    filePathInput.value = image.file_path || image.relative_path || '未知';
+
     // 显示质量信息
     const qualityInfo = document.getElementById('quality-info');
     if (image.quality_score !== null && image.quality_score !== undefined) {
@@ -690,16 +836,25 @@ function initEventListeners() {
     document.getElementById('delete-btn').addEventListener('click', async () => {
         if (state.selectedIds.size === 0) return;
 
-        if (!confirm(`确定要删除选中的 ${state.selectedIds.size} 张图片吗？`)) {
-            return;
-        }
+        const confirmed = await ConfirmDialog.show({
+            title: '确认删除',
+            message: `确定要删除选中的 ${state.selectedIds.size} 张图片吗？此操作不可恢复。`,
+            icon: '🗑️',
+            confirmText: '删除',
+            cancelText: '取消',
+            confirmClass: 'btn-danger'
+        });
+
+        if (!confirmed) return;
 
         const result = await deleteImages(Array.from(state.selectedIds));
         if (result && result.success) {
-            alert(result.message);
+            Toast.success(result.message);
             state.selectedIds.clear();
             fetchImages();
             fetchStats();
+        } else {
+            Toast.error('删除失败，请重试');
         }
     });
 
@@ -781,16 +936,52 @@ function initEventListeners() {
     document.getElementById('delete-single-btn').addEventListener('click', async () => {
         if (!state.currentImageId) return;
 
-        if (!confirm('确定要删除这张图片吗？')) {
-            return;
-        }
+        const confirmed = await ConfirmDialog.show({
+            title: '确认删除',
+            message: '确定要删除这张图片吗？此操作不可恢复。',
+            icon: '🗑️',
+            confirmText: '删除',
+            cancelText: '取消',
+            confirmClass: 'btn-danger'
+        });
+
+        if (!confirmed) return;
 
         const result = await deleteImages([state.currentImageId]);
         if (result && result.success) {
-            alert(result.message);
-            closeImageDetail();
-            fetchImages();
+            Toast.success(result.message);
+
+            // 删除后自动切换到下一张图片
+            const deletedIndex = state.currentImageIndex;
+            const deletedId = state.currentImageId;
+
+            // 从列表中移除已删除的图片
+            state.images = state.images.filter(img => img.id !== deletedId);
+            state.total--;
+
+            // 重新渲染列表（更新页面显示）
+            renderImages();
+            updatePagination();
+
+            // 如果还有图片，显示下一张或上一张
+            if (state.images.length > 0) {
+                // 如果删除的是最后一张，显示前一张
+                if (deletedIndex >= state.images.length) {
+                    showImageDetail(state.images[state.images.length - 1].id);
+                } else {
+                    // 否则显示当前位置的图片（原来的下一张）
+                    showImageDetail(state.images[deletedIndex].id);
+                }
+            } else {
+                // 如果当前页没有图片了，关闭详情弹窗并重新加载
+                closeImageDetail();
+                fetchImages();
+            }
+
+            // 更新统计信息
             fetchStats();
+        } else {
+            Toast.error('删除失败，请重试');
         }
     });
 
@@ -813,28 +1004,66 @@ function initEventListeners() {
         }
     });
 
+    // 复制路径按钮
+    document.getElementById('copy-path-btn').addEventListener('click', () => {
+        const filePathInput = document.getElementById('detail-file-path');
+        filePathInput.select();
+        document.execCommand('copy');
+        Toast.success('路径已复制到剪贴板');
+    });
+
     // 同步本地按钮
     document.getElementById('scan-btn').addEventListener('click', async () => {
-        if (confirm('确定要扫描本地图片文件夹吗？这将为所有没有元数据的图片创建记录。')) {
-            await scanLocalImages();
-        }
+        await scanLocalImages();
     });
 
     // 质量分析按钮
     document.getElementById('analyze-btn').addEventListener('click', async () => {
         const selectedCount = state.selectedIds.size;
-        let message = '';
+        const imageIds = selectedCount > 0 ? Array.from(state.selectedIds) : null;
+        await analyzeQuality(imageIds);
+    });
 
-        if (selectedCount > 0) {
-            message = `确定要分析选中的 ${selectedCount} 张图片吗？`;
-        } else {
-            message = `确定要分析所有图片吗？这可能需要一些时间。`;
-        }
+    // 分析选项按钮
+    document.getElementById('analyze-options-btn').addEventListener('click', () => {
+        document.getElementById('analysis-options-modal').style.display = 'flex';
+        updateEstimatedTime();
+    });
 
-        if (confirm(message)) {
-            const imageIds = selectedCount > 0 ? Array.from(state.selectedIds) : null;
-            await analyzeQuality(imageIds);
-        }
+    // 关闭选项弹窗
+    document.getElementById('close-analysis-options').addEventListener('click', () => {
+        document.getElementById('analysis-options-modal').style.display = 'none';
+    });
+
+    document.getElementById('cancel-analysis-options-btn').addEventListener('click', () => {
+        document.getElementById('analysis-options-modal').style.display = 'none';
+    });
+
+    // 并发数滑块
+    document.getElementById('worker-count-slider').addEventListener('input', (e) => {
+        const value = e.target.value;
+        document.getElementById('worker-count-display').textContent = value;
+        updateEstimatedTime();
+    });
+
+    // 分析模式切换
+    document.querySelectorAll('input[name="analysis-mode"]').forEach(radio => {
+        radio.addEventListener('change', updateEstimatedTime);
+    });
+
+    // 开始分析
+    document.getElementById('start-analysis-btn').addEventListener('click', async () => {
+        // 保存选项
+        state.analysisState.mode = document.querySelector('input[name="analysis-mode"]:checked').value;
+        state.analysisState.maxWorkers = parseInt(document.getElementById('worker-count-slider').value);
+
+        // 关闭弹窗
+        document.getElementById('analysis-options-modal').style.display = 'none';
+
+        // 执行分析
+        const selectedCount = state.selectedIds.size;
+        const imageIds = selectedCount > 0 ? Array.from(state.selectedIds) : null;
+        await analyzeQuality(imageIds);
     });
 
     // 上传按钮
@@ -896,7 +1125,7 @@ async function addTag() {
 
     const tags = image.tags || [];
     if (tags.includes(tag)) {
-        alert('标签已存在');
+        Toast.warning('标签已存在');
         return;
     }
 
@@ -907,6 +1136,9 @@ async function addTag() {
         input.value = '';
         showImageDetail(state.currentImageId);
         fetchImages();
+        Toast.success('标签添加成功');
+    } else {
+        Toast.error('标签添加失败');
     }
 }
 
@@ -922,7 +1154,47 @@ async function removeTag(tag) {
     if (result && result.success) {
         showImageDetail(state.currentImageId);
         fetchImages();
+        Toast.success('标签删除成功');
+    } else {
+        Toast.error('标签删除失败');
     }
+}
+
+// 预估时间计算
+function updateEstimatedTime() {
+    const mode = document.querySelector('input[name="analysis-mode"]:checked').value;
+    const workers = parseInt(document.getElementById('worker-count-slider').value);
+
+    // 基准速度：0.24 秒/张
+    const baseTime = 0.24;
+
+    // 加速比（基于实测数据）
+    const speedupFactors = {
+        4: 1.17,
+        8: 1.62,
+        12: 1.68,
+        16: 1.70
+    };
+    const speedup = speedupFactors[workers] || 1.62;
+    const timePerImage = baseTime / speedup;
+
+    // 计算图片数量
+    let imageCount;
+    if (mode === 'skip') {
+        // 假设 10% 的图片未分析（可以从 API 获取精确值）
+        imageCount = Math.ceil(state.total * 0.1);
+    } else {
+        imageCount = state.total;
+    }
+
+    // 计算总时间
+    const totalSeconds = imageCount * timePerImage;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+
+    // 显示结果
+    const display = document.getElementById('estimated-time');
+    display.textContent = `约 ${minutes} 分 ${seconds} 秒（${imageCount} 张图片）`;
 }
 
 // 初始化

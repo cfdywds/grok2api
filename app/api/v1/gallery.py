@@ -7,7 +7,7 @@ import zipfile
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.logger import logger
 from app.services.gallery import (
@@ -48,6 +48,8 @@ class AnalyzeQualityRequest(BaseModel):
     image_ids: Optional[List[str]] = None
     update_metadata: bool = True
     batch_size: int = 50
+    skip_analyzed: bool = False
+    max_workers: int = Field(default=8, ge=1, le=16)
 
 
 @router.post("/scan")
@@ -355,6 +357,8 @@ async def analyze_quality(request: AnalyzeQualityRequest):
             image_ids=request.image_ids,
             update_metadata=request.update_metadata,
             batch_size=request.batch_size,
+            skip_analyzed=request.skip_analyzed,
+            max_workers=request.max_workers,
         )
 
         return {
