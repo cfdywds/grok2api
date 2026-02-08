@@ -151,25 +151,10 @@ if __name__ == "__main__":
             "Using single worker instead."
         )
         workers = 1
-
-    # SSL 配置
-    ssl_keyfile = os.getenv("SSL_KEYFILE", "certs/key.pem")
-    ssl_certfile = os.getenv("SSL_CERTFILE", "certs/cert.pem")
-
-    # 检查证书文件是否存在
-    use_ssl = False
-    if Path(ssl_keyfile).exists() and Path(ssl_certfile).exists():
-        use_ssl = True
-        logger.info(f"SSL enabled: https://{host}:{port}")
-    else:
-        logger.info(f"SSL disabled: http://{host}:{port}")
-
     uvicorn.run(
         "main:app",
         host=host,
         port=port,
         workers=workers,
         log_level=os.getenv("LOG_LEVEL", "INFO").lower(),
-        ssl_keyfile=ssl_keyfile if use_ssl else None,
-        ssl_certfile=ssl_certfile if use_ssl else None,
     )
