@@ -248,6 +248,12 @@ async def admin_imagine_page():
     return await render_template("imagine/imagine.html")
 
 
+@router.get("/admin/img2img", response_class=HTMLResponse, include_in_schema=False)
+async def admin_img2img_page():
+    """图生图页面"""
+    return await render_template("img2img/img2img.html")
+
+
 class VoiceTokenResponse(BaseModel):
     token: str
     url: str

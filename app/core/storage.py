@@ -7,10 +7,12 @@
 - 连接池管理 (Connection Pooling)
 - 分布式/本地锁 (Distributed/Local Locking)
 - 内存优化 (序列化性能优化)
+- Windows 文件锁兼容性
 """
 
 import abc
 import os
+import sys
 import asyncio
 import hashlib
 import time
@@ -29,6 +31,9 @@ import orjson
 import aiofiles
 from app.core.logger import logger
 
+# 检测是否为 Windows 平台
+IS_WINDOWS = sys.platform == 'win32'
+
 # 数据目录（支持通过环境变量覆盖）
 DEFAULT_DATA_DIR = Path(__file__).parent.parent.parent / "data"
 DATA_DIR = Path(os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR))).expanduser()
@@ -38,6 +43,53 @@ CONFIG_FILE = DATA_DIR / "config.toml"
 TOKEN_FILE = DATA_DIR / "token.json"
 IMAGE_METADATA_FILE = DATA_DIR / "image_metadata.json"
 LOCK_DIR = DATA_DIR / ".locks"
+
+
+# Windows 文件操作辅助函数
+async def safe_atomic_write(target_path: Path, content: bytes, max_retries: int = 3):
+    """
+    安全的原子写入操作，兼容 Windows 文件锁
+
+    Args:
+        target_path: 目标文件路径
+        content: 要写入的内容
+        max_retries: 最大重试次数
+    """
+    temp_path = target_path.with_suffix(".tmp")
+
+    # 写入临时文件
+    async with aiofiles.open(temp_path, "wb") as f:
+        await f.write(content)
+
+    # 尝试原子替换
+    for attempt in range(max_retries):
+        try:
+            if IS_WINDOWS and target_path.exists():
+                # Windows: 先删除目标文件
+                try:
+                    target_path.unlink()
+                except PermissionError:
+                    if attempt < max_retries - 1:
+                        # 等待文件句柄释放
+                        await asyncio.sleep(0.1 * (attempt + 1))
+                        continue
+                    else:
+                        raise
+
+            # 原子替换
+            os.replace(temp_path, target_path)
+            return
+
+        except Exception as e:
+            if attempt == max_retries - 1:
+                # 清理临时文件
+                if temp_path.exists():
+                    try:
+                        temp_path.unlink()
+                    except Exception:
+                        pass
+                raise e
+            await asyncio.sleep(0.1 * (attempt + 1))
 
 
 # JSON 序列化优化助手函数
@@ -224,15 +276,8 @@ class LocalStorage(BaseStorage):
     async def save_tokens(self, data: Dict[str, Any]):
         try:
             TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-            temp_path = TOKEN_FILE.with_suffix(".tmp")
-
-            # 原子写操作: 写入临时文件 -> 重命名
-            async with aiofiles.open(temp_path, "wb") as f:
-                await f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
-
-            # 使用 os.replace 保证原子性
-            os.replace(temp_path, TOKEN_FILE)
-
+            content = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+            await safe_atomic_write(TOKEN_FILE, content)
         except Exception as e:
             logger.error(f"LocalStorage: 保存 Token 失败: {e}")
             raise StorageError(f"保存 Token 失败: {e}")
@@ -251,15 +296,8 @@ class LocalStorage(BaseStorage):
     async def save_image_metadata(self, data: Dict[str, Any]):
         try:
             IMAGE_METADATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-            temp_path = IMAGE_METADATA_FILE.with_suffix(".tmp")
-
-            # 原子写操作: 写入临时文件 -> 重命名
-            async with aiofiles.open(temp_path, "wb") as f:
-                await f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
-
-            # 使用 os.replace 保证原子性
-            os.replace(temp_path, IMAGE_METADATA_FILE)
-
+            content = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+            await safe_atomic_write(IMAGE_METADATA_FILE, content)
         except Exception as e:
             logger.error(f"LocalStorage: 保存图片元数据失败: {e}")
             raise StorageError(f"保存图片元数据失败: {e}")

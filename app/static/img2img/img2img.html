@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grok2API - 图生图</title>
+  <link rel="icon" href="/static/favicon/favicon.ico">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-mono/style.css" rel="stylesheet">
+  <link href="/static/common/common.css?v=3" rel="stylesheet">
+  <link href="/static/img2img/img2img.css?v=1" rel="stylesheet">
+  <link href="/static/common/toast.css" rel="stylesheet">
+</head>
+
+<body class="min-h-screen flex flex-col" style="background-color: var(--bg);">
+  <div id="toast-container" class="toast-container"></div>
+  <div id="app-header"></div>
+
+  <main class="flex-1 container mx-auto max-w-6xl px-6 py-8 fade-in">
+    <div class="space-y-6">
+      <div>
+        <h2 class="text-2xl font-semibold tracking-tight">图生图 (Image to Image)</h2>
+        <p class="text-[var(--accents-4)] mt-1 text-sm">上传参考图片，通过 AI 进行风格转换、图片编辑和创意改造。</p>
+      </div>
+
+      <div class="h-px bg-[var(--border)]"></div>
+
+      <!-- 主要内容区域 -->
+      <div class="img2img-grid">
+        <!-- 左侧：上传和设置 -->
+        <div class="img2img-card">
+          <div class="card-title">参考图片</div>
+          <div class="card-content">
+            <!-- 上传区域 -->
+            <div class="upload-zone" id="uploadZone">
+              <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg,image/webp" multiple style="display: none;">
+              <div class="upload-placeholder" id="uploadPlaceholder">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                <p class="upload-text">点击或拖拽图片到此处</p>
+                <p class="upload-hint">支持 PNG、JPEG、WebP 格式，最多 16 张，单张最大 50MB</p>
+              </div>
+              <!-- 图片预览区域 -->
+              <div class="image-preview-grid" id="imagePreviewGrid"></div>
+            </div>
+
+            <!-- 生成设置 -->
+            <div class="settings-section">
+              <div>
+                <label class="field-label" for="promptInput">编辑提示词</label>
+                <textarea id="promptInput" class="geist-input img2img-textarea" placeholder="描述你想要的效果，例如：将这张图片转换为油画风格，增强色彩饱和度"></textarea>
+              </div>
+
+              <div class="settings-row">
+                <div>
+                  <label class="field-label" for="countSelect">生成数量</label>
+                  <select id="countSelect" class="geist-input">
+                    <option value="1">1 张</option>
+                    <option value="2" selected>2 张</option>
+                    <option value="3">3 张</option>
+                    <option value="4">4 张</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label" for="formatSelect">输出格式</label>
+                  <select id="formatSelect" class="geist-input">
+                    <option value="b64_json" selected>Base64</option>
+                    <option value="url">URL</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="settings-toggle">
+                <label class="field-label" for="streamToggle">流式输出</label>
+                <label class="toggle">
+                  <input id="streamToggle" type="checkbox">
+                  <span class="toggle-track"></span>
+                  <span class="toggle-label">实时显示生成过程</span>
+                </label>
+              </div>
+
+              <button id="generateBtn" class="geist-button-primary generate-btn" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                <span>开始生成</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧：生成结果 -->
+        <div class="img2img-card">
+          <div class="card-title-row">
+            <div class="card-title">生成结果</div>
+            <div class="result-actions">
+              <button id="clearResultsBtn" class="icon-btn" title="清空结果" style="display: none;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+              </button>
+              <button id="downloadAllBtn" class="icon-btn" title="下载全部" style="display: none;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="card-content">
+            <!-- 空状态 -->
+            <div class="empty-state" id="emptyState">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+              <p>上传图片并开始生成</p>
+            </div>
+
+            <!-- 加载状态 -->
+            <div class="loading-state" id="loadingState" style="display: none;">
+              <div class="spinner"></div>
+              <p>正在生成中...</p>
+              <p class="loading-hint" id="loadingHint">请稍候，这可能需要几秒钟</p>
+            </div>
+
+            <!-- 结果网格 -->
+            <div class="result-grid" id="resultGrid"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 使用说明 -->
+      <div class="img2img-card">
+        <div class="card-title">使用说明</div>
+        <div class="card-content">
+          <div class="usage-tips">
+            <div class="tip-item">
+              <div class="tip-icon">📸</div>
+              <div class="tip-content">
+                <h4>上传参考图片</h4>
+                <p>支持 PNG、JPEG、WebP 格式，最多上传 16 张图片，单张最大 50MB</p>
+              </div>
+            </div>
+            <div class="tip-item">
+              <div class="tip-icon">✍️</div>
+              <div class="tip-content">
+                <h4>编写提示词</h4>
+                <p>描述你想要的效果，例如：转换为油画风格、增强色彩、改变背景等</p>
+              </div>
+            </div>
+            <div class="tip-item">
+              <div class="tip-icon">🎨</div>
+              <div class="tip-content">
+                <h4>生成新图片</h4>
+                <p>AI 会基于你的参考图片和提示词，生成符合要求的新图片</p>
+              </div>
+            </div>
+            <div class="tip-item">
+              <div class="tip-icon">💡</div>
+              <div class="tip-content">
+                <h4>提示词建议</h4>
+                <p>风格转换：油画风格、水彩画、卡通风格、赛博朋克风格<br>
+                   图片增强：提升清晰度、增强色彩、改善光线<br>
+                   创意改造：改变背景、添加元素、修改细节</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 图片预览弹窗 -->
+  <div id="imageModal" class="image-modal" style="display: none;">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <button class="modal-close" id="modalClose">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+      <img id="modalImage" src="" alt="预览">
+      <div class="modal-actions">
+        <button id="modalDownload" class="geist-button-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          下载图片
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/common/toast.js"></script>
+  <script src="/static/img2img/img2img.js?v=1"></script>
+  <script>
+    // 加载导航栏
+    fetch('/static/common/header.html')
+      .then(response => response.text())
+      .then(html => {
+        document.getElementById('app-header').innerHTML = html;
+      });
+  </script>
+</body>
+
+</html>
