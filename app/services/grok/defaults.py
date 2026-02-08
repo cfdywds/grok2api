@@ -33,7 +33,7 @@ GROK_DEFAULTS = {
     },
     "retry": {
         "max_retry": 3,
-        "retry_status_codes": [401, 429, 403],
+        "retry_status_codes": [401, 429, 403, 502],
         "retry_backoff_base": 0.5,
         "retry_backoff_factor": 2.0,
         "retry_backoff_max": 30.0,

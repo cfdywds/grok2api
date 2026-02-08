@@ -372,6 +372,23 @@ async def analyze_quality(request: AnalyzeQualityRequest):
         raise HTTPException(status_code=500, detail=f"批量分析图片质量失败: {str(e)}")
 
 
+@router.post("/stop-analysis")
+async def stop_analysis():
+    """
+    停止正在进行的图片质量分析
+    """
+    try:
+        service = get_image_metadata_service()
+        service.stop_analysis()
+        return {
+            "success": True,
+            "message": "已发送停止信号",
+        }
+    except Exception as e:
+        logger.error(f"停止分析失败: {e}")
+        raise HTTPException(status_code=500, detail=f"停止分析失败: {str(e)}")
+
+
 @router.get("/images/{image_id}/quality")
 async def get_image_quality(image_id: str):
     """

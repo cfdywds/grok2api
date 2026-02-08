@@ -27,6 +27,7 @@ from app.core.exceptions import AppException, UpstreamException, ValidationExcep
 from app.core.logger import logger
 from app.core.storage import DATA_DIR
 from app.services.grok.utils.headers import apply_statsig, build_sso_cookie
+from app.services.grok.utils.retry import retry_on_status
 from app.services.token.service import TokenService
 
 # ==================== 常量 ====================
@@ -173,8 +174,11 @@ class BaseService:
         headers["Cookie"] = build_sso_cookie(token)
         return headers
 
-    async def _get_session(self) -> AsyncSession:
+    async def _get_session(self, reuse: bool = True) -> AsyncSession:
         """获取复用 Session"""
+        if not reuse:
+            # 不复用，创建新 session（避免 HTTP/2 连接问题）
+            return AsyncSession()
         if self._session is None:
             self._session = AsyncSession()
         return self._session
@@ -272,9 +276,14 @@ class BaseService:
 class UploadService(BaseService):
     """文件上传服务"""
 
-    async def upload(self, file_input: str, token: str) -> Tuple[str, str]:
+    async def upload(self, file_input: str, token: str, reuse_session: bool = False) -> Tuple[str, str]:
         """
         上传文件到 Grok
+
+        Args:
+            file_input: 文件输入（URL 或 base64）
+            token: 认证 token
+            reuse_session: 是否复用 session（默认 False，避免 HTTP/2 连接问题）
 
         Returns:
             (file_id, file_uri)
@@ -293,46 +302,80 @@ class UploadService(BaseService):
             if not b64:
                 raise ValidationException("Invalid file input: empty content")
 
-            # 执行上传
-            session = await self._get_session()
-            response = await session.post(
-                UPLOAD_API,
-                headers=self._build_headers(token),
-                json={"fileName": filename, "fileMimeType": mime, "content": b64},
-                impersonate=self.config.browser,
-                timeout=self.config.timeout,
-                proxies=self.config.get_proxies(),
-            )
+            # 定义上传函数（用于重试）
+            async def _do_upload():
+                session = await self._get_session(reuse=reuse_session)
+                session_owned = not reuse_session  # 如果不复用，则需要关闭
 
-            # 处理响应
-            if response.status_code == 200:
-                result = response.json()
-                file_id = result.get("fileMetadataId", "")
-                file_uri = result.get("fileUri", "")
-                logger.info(f"Upload success: {filename} -> {file_id}")
-                return file_id, file_uri
-
-            # 认证失败
-            if response.status_code in (401, 403):
-                logger.warning(f"Upload auth failed: {response.status_code}")
                 try:
-                    await TokenService.record_fail(
-                        token, response.status_code, "upload_auth_failed"
+                    response = await session.post(
+                        UPLOAD_API,
+                        headers=self._build_headers(token),
+                        json={"fileName": filename, "fileMimeType": mime, "content": b64},
+                        impersonate=self.config.browser,
+                        timeout=self.config.timeout,
+                        proxies=self.config.get_proxies(),
+                    )
+
+                    # 处理响应
+                    if response.status_code == 200:
+                        result = response.json()
+                        file_id = result.get("fileMetadataId", "")
+                        file_uri = result.get("fileUri", "")
+                        logger.info(f"Upload success: {filename} -> {file_id}")
+                        return file_id, file_uri
+
+                    # 认证失败
+                    if response.status_code in (401, 403):
+                        logger.warning(f"Upload auth failed: {response.status_code}")
+                        try:
+                            await TokenService.record_fail(
+                                token, response.status_code, "upload_auth_failed"
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to record token failure: {e}")
+
+                        raise UpstreamException(
+                            message=f"Upload authentication failed: {response.status_code}",
+                            details={"status": response.status_code, "token_invalidated": True},
+                        )
+
+                    # 其他错误
+                    logger.error(f"Upload failed: {filename} - {response.status_code}")
+                    raise UpstreamException(
+                        message=f"Upload failed: {response.status_code}",
+                        details={"status": response.status_code},
                     )
                 except Exception as e:
-                    logger.error(f"Failed to record token failure: {e}")
+                    # 检查是否为 HTTP/2 错误
+                    err_str = str(e).lower()
+                    is_http2_error = "http/2" in err_str or "curl: (92)" in err_str or "protocol_error" in err_str
 
-                raise UpstreamException(
-                    message=f"Upload authentication failed: {response.status_code}",
-                    details={"status": response.status_code, "token_invalidated": True},
-                )
+                    if is_http2_error:
+                        logger.warning(f"HTTP/2 error during upload: {e}")
+                        # 将 HTTP/2 错误包装为可重试的 UpstreamException
+                        raise UpstreamException(
+                            message=f"HTTP/2 connection error: {str(e)}",
+                            details={"status": 502, "error": str(e), "type": "http2_error"},
+                        )
+                    raise
+                finally:
+                    # 如果是独立 session，需要关闭
+                    if session_owned:
+                        await session.close()
 
-            # 其他错误
-            logger.error(f"Upload failed: {filename} - {response.status_code}")
-            raise UpstreamException(
-                message=f"Upload failed: {response.status_code}",
-                details={"status": response.status_code},
-            )
+            # 使用重试机制执行上传
+            def extract_status(e: Exception) -> Optional[int]:
+                if isinstance(e, UpstreamException) and e.details:
+                    return e.details.get("status")
+                return None
+
+            try:
+                return await retry_on_status(_do_upload, extract_status=extract_status)
+            except Exception as e:
+                # 如果重试失败，记录详细错误
+                logger.error(f"Upload failed after retries: {filename} - {e}")
+                raise
 
 
 # ==================== 列表服务 ====================

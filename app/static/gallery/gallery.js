@@ -328,6 +328,10 @@ async function scanLocalImages() {
 
 async function analyzeQuality(imageIds = null) {
     try {
+        // 显示停止按钮，隐藏分析按钮
+        document.getElementById('analyze-btn').style.display = 'none';
+        document.getElementById('stop-analysis-btn').style.display = 'inline-block';
+
         showLoading();
         const response = await fetch(`${API_BASE}/analyze-quality`, {
             method: 'POST',
@@ -344,7 +348,18 @@ async function analyzeQuality(imageIds = null) {
 
         if (data.success) {
             const mode = state.analysisState.mode === 'skip' ? '增量' : '全量';
-            Toast.success(`${mode}分析完成：${data.message}`);
+            const result = data.data;
+
+            if (result.stopped) {
+                Toast.warning(`${mode}分析已停止：已完成 ${result.analyzed}/${result.total} 张`);
+            } else {
+                let message = `${mode}分析完成：成功 ${result.analyzed}, 失败 ${result.failed}, 低质量 ${result.low_quality_count}`;
+                if (result.skipped > 0) {
+                    message += `, 跳过 ${result.skipped}`;
+                }
+                Toast.success(message);
+            }
+
             fetchImages();
             fetchStats();
         } else {
@@ -355,6 +370,27 @@ async function analyzeQuality(imageIds = null) {
         Toast.error('分析失败，请重试');
     } finally {
         hideLoading();
+        // 恢复按钮状态
+        document.getElementById('analyze-btn').style.display = 'inline-block';
+        document.getElementById('stop-analysis-btn').style.display = 'none';
+    }
+}
+
+async function stopAnalysis() {
+    try {
+        const response = await fetch(`${API_BASE}/stop-analysis`, {
+            method: 'POST',
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            Toast.info('正在停止分析...');
+        } else {
+            Toast.error('停止失败，请重试');
+        }
+    } catch (error) {
+        console.error('停止分析失败:', error);
+        Toast.error('停止失败，请重试');
     }
 }
 
@@ -1060,6 +1096,11 @@ function initEventListeners() {
         const selectedCount = state.selectedIds.size;
         const imageIds = selectedCount > 0 ? Array.from(state.selectedIds) : null;
         await analyzeQuality(imageIds);
+    });
+
+    // 停止分析按钮
+    document.getElementById('stop-analysis-btn').addEventListener('click', async () => {
+        await stopAnalysis();
     });
 
     // 分析选项按钮

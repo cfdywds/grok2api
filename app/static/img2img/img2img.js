@@ -286,7 +286,7 @@ async function generateImagesNonStream(prompt, count, format) {
     formData.append('image', file.file);
   }
 
-  const response = await fetch('/v1/images/edits', {
+  const response = await fetch('/api/v1/admin/img2img', {
     method: 'POST',
     body: formData
   });
@@ -333,7 +333,7 @@ async function generateImagesStream(prompt, count, format) {
     formData.append('image', file.file);
   }
 
-  const response = await fetch('/v1/images/edits', {
+  const response = await fetch('/api/v1/admin/img2img', {
     method: 'POST',
     body: formData
   });

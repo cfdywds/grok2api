@@ -36,6 +36,9 @@ class ImageMetadataService:
         # 初始化高级图片分析器（懒加载）
         self._analyzer = None
 
+        # 分析停止标志
+        self._stop_analysis = False
+
     def _get_analyzer(self):
         """获取分析器实例（懒加载）"""
         if self._analyzer is None and ADVANCED_ANALYZER_AVAILABLE:
@@ -730,34 +733,77 @@ class ImageMetadataService:
             分析结果统计
         """
         try:
+            # 重置停止标志
+            self._stop_analysis = False
+
             # 获取要分析的图片列表
+            data = await self.storage.load_image_metadata()
+            all_images = data.get("images", [])
+
+            # 按照创建时间倒序排序（最新的图片优先分析）
+            all_images.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+
             if image_ids is None:
-                data = await self.storage.load_image_metadata()
-                all_images = data.get("images", [])
+                # 分析所有图片
                 image_ids = [img["id"] for img in all_images]
+            else:
+                # 保持指定图片的顺序，但也按创建时间排序
+                id_to_img = {img["id"]: img for img in all_images}
+                sorted_specified = sorted(
+                    [id_to_img[img_id] for img_id in image_ids if img_id in id_to_img],
+                    key=lambda x: x.get("created_at", 0),
+                    reverse=True
+                )
+                image_ids = [img["id"] for img in sorted_specified]
 
             original_total = len(image_ids)
 
             # 如果启用跳过模式，过滤掉已分析的图片
             if skip_analyzed:
-                data = await self.storage.load_image_metadata()
-                all_images = {img["id"]: img for img in data.get("images", [])}
-                image_ids = [
+                all_images_dict = {img["id"]: img for img in all_images}
+                unanalyzed_ids = [
                     img_id for img_id in image_ids
-                    if img_id in all_images and
-                       all_images[img_id].get("quality_score") is None
+                    if img_id in all_images_dict and
+                       all_images_dict[img_id].get("quality_score") is None
                 ]
-                logger.info(f"跳过模式：需分析 {len(image_ids)} 张图片（已过滤 {original_total - len(image_ids)} 张）")
+                skipped_count = len(image_ids) - len(unanalyzed_ids)
+                image_ids = unanalyzed_ids
+                logger.info(f"增量分析模式：需分析 {len(image_ids)} 张图片（跳过已分析 {skipped_count} 张）")
+            else:
+                logger.info(f"全量分析模式：需分析 {len(image_ids)} 张图片")
 
             total = len(image_ids)
             analyzed = 0
             failed = 0
             low_quality_count = 0
 
+            if total == 0:
+                logger.info("没有需要分析的图片")
+                return {
+                    "total": 0,
+                    "analyzed": 0,
+                    "failed": 0,
+                    "low_quality_count": 0,
+                    "skipped": original_total if skip_analyzed else 0,
+                    "stopped": False
+                }
+
             logger.info(f"开始批量分析图片质量: 共 {total} 张，并发数 {max_workers}")
 
             # 分批处理
             for i in range(0, total, batch_size):
+                # 检查停止标志
+                if self._stop_analysis:
+                    logger.info(f"分析已停止: 已完成 {analyzed}/{total} 张")
+                    return {
+                        "total": total,
+                        "analyzed": analyzed,
+                        "failed": failed,
+                        "low_quality_count": low_quality_count,
+                        "skipped": original_total - total if skip_analyzed else 0,
+                        "stopped": True
+                    }
+
                 batch_ids = image_ids[i:i + batch_size]
 
                 # 使用线程池并行处理
@@ -770,6 +816,13 @@ class ImageMetadataService:
 
                     # 收集结果
                     for future in as_completed(future_to_id):
+                        # 再次检查停止标志
+                        if self._stop_analysis:
+                            # 取消剩余任务
+                            for f in future_to_id:
+                                f.cancel()
+                            break
+
                         img_id = future_to_id[future]
                         try:
                             result = future.result()
@@ -798,7 +851,9 @@ class ImageMetadataService:
                 "analyzed": analyzed,
                 "failed": failed,
                 "low_quality_count": low_quality_count,
-                "low_quality_threshold": 60
+                "low_quality_threshold": 60,
+                "skipped": original_total - total if skip_analyzed else 0,
+                "stopped": False
             }
 
         except Exception as e:
@@ -808,8 +863,14 @@ class ImageMetadataService:
                 "analyzed": 0,
                 "failed": 0,
                 "low_quality_count": 0,
-                "error": str(e)
+                "error": str(e),
+                "stopped": False
             }
+
+    def stop_analysis(self):
+        """停止正在进行的分析"""
+        self._stop_analysis = True
+        logger.info("收到停止分析请求")
 
     async def _update_quality_metadata(self, image_id: str, quality_result: Dict[str, Any]) -> bool:
         """

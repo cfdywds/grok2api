@@ -52,8 +52,8 @@ filter_tags = ["xaiartifact","xai:tool_usage_card","grok:render"]
 [retry]
 # 最大重试次数
 max_retry = 3
-# 触发重试的 HTTP 状态码
-retry_status_codes = [401,429,403]
+# 触发重试的 HTTP 状态码（包括 502 用于 HTTP/2 错误重试）
+retry_status_codes = [401,429,403,502]
 # 退避基础延迟（秒）
 retry_backoff_base = 0.5
 # 退避倍率
