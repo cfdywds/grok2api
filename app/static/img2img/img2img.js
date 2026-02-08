@@ -187,9 +187,8 @@ function updateUI() {
     imagePreviewGrid.innerHTML = '';
   }
 
-  // 更新生成按钮
-  const prompt = document.getElementById('promptInput').value.trim();
-  generateBtn.disabled = state.uploadedFiles.length === 0 || !prompt || state.isGenerating;
+  // 更新生成按钮 - 只要有图片就可以点击，提示词可以在点击时检查
+  generateBtn.disabled = state.uploadedFiles.length === 0 || state.isGenerating;
 
   // 更新结果区域
   if (state.generatedImages.length > 0) {
