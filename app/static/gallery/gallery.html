@@ -85,6 +85,12 @@
                         <option value="low">较差 (<60分)</option>
                         <option value="issues">有质量问题</option>
                     </select>
+                    <select id="page-size-filter" class="filter-select" title="每页显示数量">
+                        <option value="20">20/页</option>
+                        <option value="50" selected>50/页</option>
+                        <option value="100">100/页</option>
+                        <option value="200">200/页</option>
+                    </select>
                     <button id="filter-btn" class="btn btn-primary">筛选</button>
                     <button id="reset-btn" class="btn btn-secondary">重置</button>
                 </div>
@@ -215,7 +221,7 @@
         <!-- 图片详情弹窗 -->
         <div id="detail-modal" class="modal" style="display: none;">
             <div class="modal-content">
-                <span class="modal-close">&times;</span>
+                <span class="modal-close" id="close-detail-modal">&times;</span>
                 <!-- 导航按钮 -->
                 <button id="prev-image-btn" class="modal-nav-btn modal-nav-prev" title="上一张">
                     <span>‹</span>

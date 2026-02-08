@@ -1,14 +1,27 @@
 // 图片管理 JavaScript
 
+// 从 localStorage 读取用户偏好
+function loadUserPreferences() {
+    const savedPageSize = localStorage.getItem('gallery_page_size');
+    const savedViewMode = localStorage.getItem('gallery_view_mode');
+
+    return {
+        pageSize: savedPageSize ? parseInt(savedPageSize) : 50,
+        viewMode: savedViewMode || 'grid'
+    };
+}
+
+const userPrefs = loadUserPreferences();
+
 // 全局状态
 const state = {
     images: [],
     selectedIds: new Set(),
     currentPage: 1,
-    pageSize: 50,
+    pageSize: userPrefs.pageSize,
     totalPages: 0,
     total: 0,
-    viewMode: 'grid', // 'grid' or 'list'
+    viewMode: userPrefs.viewMode,
     filters: {
         search: '',
         model: '',
@@ -567,7 +580,11 @@ function updatePagination() {
     pagination.style.display = 'flex';
     paginationTop.style.display = 'flex';
 
-    const pageText = `第 ${state.currentPage} 页 / 共 ${state.totalPages} 页`;
+    // 计算当前显示的图片范围
+    const startIndex = (state.currentPage - 1) * state.pageSize + 1;
+    const endIndex = Math.min(state.currentPage * state.pageSize, state.total);
+
+    const pageText = `显示 ${startIndex}-${endIndex} / 共 ${state.total} 张 (第 ${state.currentPage}/${state.totalPages} 页)`;
     pageInfo.textContent = pageText;
     pageInfoTop.textContent = pageText;
 
@@ -769,6 +786,17 @@ function initEventListeners() {
         fetchImages();
     });
 
+    // 分页大小变化
+    document.getElementById('page-size-filter').addEventListener('change', (e) => {
+        state.pageSize = parseInt(e.target.value);
+        state.currentPage = 1; // 重置到第一页
+
+        // 保存用户偏好
+        localStorage.setItem('gallery_page_size', state.pageSize);
+
+        fetchImages();
+    });
+
     // 重置按钮
     document.getElementById('reset-btn').addEventListener('click', () => {
         document.getElementById('search-input').value = '';
@@ -776,6 +804,7 @@ function initEventListeners() {
         document.getElementById('ratio-filter').value = '';
         document.getElementById('sort-filter').value = 'created_at:desc';
         document.getElementById('quality-filter').value = '';
+        document.getElementById('page-size-filter').value = '50';
 
         state.filters = {
             search: '',
@@ -788,6 +817,7 @@ function initEventListeners() {
             hasQualityIssues: null,
         };
 
+        state.pageSize = 50;
         state.currentPage = 1;
         fetchImages();
     });
@@ -804,6 +834,10 @@ function initEventListeners() {
         state.viewMode = 'grid';
         document.getElementById('view-grid').classList.add('active');
         document.getElementById('view-list').classList.remove('active');
+
+        // 保存用户偏好
+        localStorage.setItem('gallery_view_mode', 'grid');
+
         renderImages();
     });
 
@@ -811,6 +845,10 @@ function initEventListeners() {
         state.viewMode = 'list';
         document.getElementById('view-list').classList.add('active');
         document.getElementById('view-grid').classList.remove('active');
+
+        // 保存用户偏好
+        localStorage.setItem('gallery_view_mode', 'list');
+
         renderImages();
     });
 
@@ -893,7 +931,7 @@ function initEventListeners() {
     });
 
     // 弹窗关闭
-    document.querySelector('.modal-close').addEventListener('click', closeImageDetail);
+    document.getElementById('close-detail-modal').addEventListener('click', closeImageDetail);
     document.getElementById('detail-modal').addEventListener('click', (e) => {
         if (e.target.id === 'detail-modal') {
             closeImageDetail();
@@ -1199,6 +1237,17 @@ function updateEstimatedTime() {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
+    // 恢复用户偏好的 UI 状态
+    document.getElementById('page-size-filter').value = state.pageSize.toString();
+
+    if (state.viewMode === 'grid') {
+        document.getElementById('view-grid').classList.add('active');
+        document.getElementById('view-list').classList.remove('active');
+    } else {
+        document.getElementById('view-list').classList.add('active');
+        document.getElementById('view-grid').classList.remove('active');
+    }
+
     initEventListeners();
     fetchStats();
     fetchImages();
