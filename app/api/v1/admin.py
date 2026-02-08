@@ -2156,6 +2156,78 @@ async def admin_img2img(
         while len(selected_images) < n:
             selected_images.append("error")
 
+    # 保存图片元数据到图片管理系统
+    try:
+        service = get_image_metadata_service()
+        image_dir = Path(__file__).parent.parent.parent.parent / "data" / "tmp" / "image"
+        image_dir.mkdir(parents=True, exist_ok=True)
+
+        for img_b64 in selected_images:
+            if not img_b64 or img_b64 == "error":
+                continue
+
+            try:
+                # 生成唯一 ID
+                image_id = str(uuid.uuid4())
+                filename = f"{image_id}.jpg"
+                file_path = image_dir / filename
+
+                # 解码并保存图片文件
+                if img_b64.startswith("data:"):
+                    img_b64 = img_b64.split(",", 1)[1]
+                image_bytes = base64.b64decode(img_b64)
+                file_path.write_bytes(image_bytes)
+
+                # 获取文件信息
+                file_size = file_path.stat().st_size
+
+                # 解析尺寸
+                width, height = 1024, 1024
+                try:
+                    w_str, h_str = size.split("x")
+                    width = int(w_str)
+                    height = int(h_str)
+                except Exception:
+                    pass
+
+                # 计算宽高比
+                from math import gcd
+                gcd_val = gcd(width, height)
+                aspect_w = width // gcd_val
+                aspect_h = height // gcd_val
+                aspect_ratio = f"{aspect_w}:{aspect_h}"
+
+                # 创建元数据
+                metadata = ImageMetadata(
+                    id=image_id,
+                    filename=filename,
+                    prompt=prompt,
+                    model=model or "grok-imagine-1.0-edit",
+                    aspect_ratio=aspect_ratio,
+                    created_at=int(time.time() * 1000),
+                    file_size=file_size,
+                    width=width,
+                    height=height,
+                    tags=["图生图"],
+                    nsfw=False,
+                    metadata={
+                        "source": "img2img",
+                        "quality": quality,
+                        "style": style or "",
+                    },
+                )
+
+                # 保存元数据
+                await service.add_image(metadata)
+                logger.info(f"保存图生图元数据成功: {image_id}")
+
+            except Exception as e:
+                logger.error(f"保存图生图元数据失败: {e}")
+                continue
+
+    except Exception as e:
+        logger.error(f"保存图生图元数据失败: {e}")
+
     data = [{response_field: img} for img in selected_images]
 
     return JSONResponse(
