@@ -283,7 +283,7 @@
           });
           const micTrack = micStream.getAudioTracks()[0];
           log(`已获取麦克风: ${micTrack.label}`);
-          audioSources.push({ track: micTrack, name: '麦克风' });
+          audioSources.push({ track: micTrack, name: '麦克风', isNative: true });
         } catch (err) {
           log(`开启麦克风失败: ${err.message}`, 'error');
           toast('麦克风开启失败', 'error');
@@ -297,14 +297,29 @@
       if (audioSources.length === 1) {
         log(`使用单一音频源: ${audioSources[0].name}`);
 
-        // 直接发布已获取的轨道
-        const publication = await room.localParticipant.publishTrack(audioSources[0].track, {
-          name: audioSources[0].name === '麦克风' ? 'microphone' : 'tab-audio'
-        });
-
-        log(`已发布音频轨道: trackSid=${publication.trackSid}`);
-        log(`${audioSources[0].name}已开启，AI 正在监听...`);
-        toast('音频连接成功', 'success');
+        // 如果是单一麦克风，使用 LiveKit 的 createLocalTracks 方法
+        if (audioSources[0].name === '麦克风' && audioSources[0].isNative) {
+          log('使用 LiveKit createLocalTracks 创建麦克风轨道...');
+          // 停止之前获取的原生轨道
+          audioSources[0].track.stop();
+          // 使用 LiveKit 标准方法创建轨道
+          const tracks = await createLocalTracks({ audio: true, video: false });
+          for (const track of tracks) {
+            await room.localParticipant.publishTrack(track);
+            log(`已发布音频轨道: ${track.kind}`);
+          }
+          log('麦克风已开启，AI 正在监听...');
+          toast('语音连接成功', 'success');
+        }
+        // 如果是标签页音频，直接发布原生轨道
+        else {
+          const publication = await room.localParticipant.publishTrack(audioSources[0].track, {
+            name: 'tab-audio'
+          });
+          log(`已发布音频轨道: trackSid=${publication.trackSid}`);
+          log(`${audioSources[0].name}已开启，AI 正在监听...`);
+          toast('音频连接成功', 'success');
+        }
       }
       // 如果有多个音频源，混合后发布
       else if (audioSources.length > 1) {

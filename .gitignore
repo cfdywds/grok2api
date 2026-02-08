@@ -92,3 +92,43 @@ README_图片管理功能.md
 图片管理功能完善总结.md
 完成总结.txt
 claude.md
+
+# 临时文档和总结报告
+COMPLETION_REPORT.md
+FINAL_UPDATE.md
+IMPLEMENTATION_SUMMARY.md
+OPTIMIZATION_COMPLETE.md
+QUICK_REFERENCE.md
+QUICK_START.md
+README_UPDATE.md
+README_图片质量评分系统.md
+TOAST_UPDATE_README.md
+UPDATE_SUMMARY.md
+快速参考.txt
+前端集成示例.md
+实施指南.md
+使用说明.txt
+图片存储机制说明.md
+图片存储快速参考.txt
+图片评分快速参考.txt
+图片质量评分方案.md
+图片质量评分系统使用指南.md
+完成总结.md
+项目交付清单.md
+项目完成报告.md
+项目完成总结.md
+最终交付报告.md
+最终总结.txt
+
+# 临时脚本
+advanced_image_analyzer.py
+check_deployment.py
+install_image_analyzer.sh
+quick_start.sh
+test_toast.html
+verify.sh
+verify_quality_system.py
+verify_update.py
+
+# SSL证书（如果是自签名测试证书）
+certs/
