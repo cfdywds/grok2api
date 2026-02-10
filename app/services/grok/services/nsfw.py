@@ -130,16 +130,13 @@ class NSFWService:
         try:
             browser = get_config("security.browser")
             async with AsyncSession(impersonate=browser) as session:
-                # 先设置出生日期
+                # 先设置出生日期（如果失败也继续，可能账号已经设置过）
                 logger.info(f"Setting birth date for token: {token[:10]}...")
                 ok, birth_status, birth_err = await self._set_birth_date(session, token)
                 if not ok:
-                    logger.warning(f"Birth date failed for {token[:10]}...: status={birth_status}, error={birth_err}")
-                    return NSFWResult(
-                        success=False,
-                        http_status=birth_status,
-                        error=f"Set birth date failed: {birth_err}",
-                    )
+                    logger.warning(f"Birth date failed for {token[:10]}...: status={birth_status}, error={birth_err}, continuing anyway...")
+                else:
+                    logger.info(f"Birth date set successfully for {token[:10]}...")
 
                 # 开启 NSFW
                 logger.info(f"Enabling NSFW for token: {token[:10]}...")
