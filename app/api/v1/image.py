@@ -64,6 +64,12 @@ class ImageEditRequest(BaseModel):
     style: Optional[str] = Field(None, description="风格 (暂不支持)")
     stream: Optional[bool] = Field(False, description="是否流式输出")
 
+    # 图片编辑控制参数
+    strength: Optional[float] = Field(0.85, ge=0.0, le=1.0, description="编辑强度 (0-1)，越高越激进，默认0.85")
+    edit_mode: Optional[str] = Field("comprehensive", description="编辑模式: conservative(保守)/comprehensive(全面)/aggressive(激进)")
+    preserve_background: Optional[bool] = Field(False, description="是否保留背景，默认False允许改变背景")
+    guidance_scale: Optional[float] = Field(7.5, ge=1.0, le=20.0, description="提示词引导强度 (1-20)，默认7.5")
+
 
 def _validate_common_request(
     request: Union[ImageGenerationRequest, ImageEditRequest],
@@ -826,12 +832,35 @@ async def edit_image(
                 logger.debug(f"Parent post ID: {parent_post_id}")
                 break
 
+    # 构建imageEditModelConfig，添加编辑控制参数
+    image_edit_config = {
+        "imageReferences": image_urls,
+    }
+
+    # 添加编辑强度参数（如果Grok API支持）
+    if edit_request.strength is not None and edit_request.strength != 0.85:
+        image_edit_config["strength"] = edit_request.strength
+        logger.info(f"使用自定义编辑强度: {edit_request.strength}")
+
+    # 添加编辑模式参数
+    if edit_request.edit_mode and edit_request.edit_mode != "comprehensive":
+        image_edit_config["editMode"] = edit_request.edit_mode
+        logger.info(f"使用编辑模式: {edit_request.edit_mode}")
+
+    # 添加背景保留参数
+    if edit_request.preserve_background:
+        image_edit_config["preserveBackground"] = True
+        logger.info("启用背景保留模式")
+
+    # 添加引导强度参数
+    if edit_request.guidance_scale is not None and edit_request.guidance_scale != 7.5:
+        image_edit_config["guidanceScale"] = edit_request.guidance_scale
+        logger.info(f"使用自定义引导强度: {edit_request.guidance_scale}")
+
     model_config_override = {
         "modelMap": {
             "imageEditModel": "imagine",
-            "imageEditModelConfig": {
-                "imageReferences": image_urls,
-            },
+            "imageEditModelConfig": image_edit_config,
         }
     }
 
@@ -840,10 +869,28 @@ async def edit_image(
             parent_post_id
         )
 
+    # 优化提示词格式，添加明确的编辑指令前缀
+    # 根据编辑模式调整提示词
+    optimized_prompt = edit_request.prompt
+    if edit_request.edit_mode == "comprehensive":
+        # 全面编辑模式：强调所有变化都要实现
+        optimized_prompt = f"Comprehensive image edit - Apply ALL changes: {edit_request.prompt}"
+    elif edit_request.edit_mode == "aggressive":
+        # 激进模式：允许大幅改变
+        optimized_prompt = f"Aggressive image transformation: {edit_request.prompt}"
+    elif edit_request.edit_mode == "conservative":
+        # 保守模式：保留原图特征
+        optimized_prompt = f"Conservative edit while preserving original features: {edit_request.prompt}"
+    else:
+        # 默认：添加编辑指令前缀
+        optimized_prompt = f"Edit image: {edit_request.prompt}"
+
+    logger.info(f"优化后的提示词: {optimized_prompt[:100]}...")
+
     raw_payload = {
         "temporary": bool(get_config("chat.temporary")),
         "modelName": model_info.grok_model,
-        "message": edit_request.prompt,
+        "message": optimized_prompt,  # 使用优化后的提示词
         "enableImageGeneration": True,
         "returnImageBytes": False,
         "returnRawGrokInXaiRequest": False,
@@ -854,11 +901,14 @@ async def edit_image(
         "enableSideBySide": True,
         "sendFinalMetadata": True,
         "isReasoning": False,
-        "disableTextFollowUps": True,
+        "disableTextFollowUps": False,  # 改为False，允许文本跟进以便更好地理解编辑指令
         "responseMetadata": {"modelConfigOverride": model_config_override},
         "disableMemory": False,
         "forceSideBySide": False,
     }
+
+    # 记录完整的payload用于调试
+    logger.debug(f"Image edit payload: {raw_payload}")
 
     # 流式模式
     if edit_request.stream:
