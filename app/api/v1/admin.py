@@ -1166,6 +1166,9 @@ async def enable_nsfw_api(data: dict):
                 fail_count += 1
                 results[masked] = res.get("data") or {"error": res.get("error")}
 
+        # 立即保存 token 变更
+        await mgr._save()
+
         response = {
             "status": "success",
             "summary": {
@@ -1780,6 +1783,9 @@ async def clear_online_cache_api(data: dict):
                 else:
                     results[token] = {"status": "error", "error": res.get("error")}
 
+            # 立即保存 token 变更
+            await mgr._save()
+
             response = {"status": "success", "results": results}
             if truncated:
                 response["warning"] = (
@@ -1871,6 +1877,9 @@ async def clear_online_cache_api_async(data: dict):
                 else:
                     fail_count += 1
                     results[token] = {"status": "error", "error": data.get("error")}
+
+            # 立即保存 token 变更
+            await mgr._save()
 
             result = {
                 "status": "success",
