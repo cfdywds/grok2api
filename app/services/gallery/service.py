@@ -91,11 +91,29 @@ class ImageMetadataService:
             async with self.storage.acquire_lock("image_metadata", timeout=10):
                 data = await self.storage.load_image_metadata()
 
-                # 检查是否已存在
+                # 检查是否已存在（基于ID）
                 existing_ids = {img["id"] for img in data.get("images", [])}
                 if metadata.id in existing_ids:
                     logger.warning(f"图片元数据已存在: {metadata.id}")
                     return False
+
+                # 检查是否已存在（基于文件名）
+                existing_filenames = {img.get("filename") for img in data.get("images", [])}
+                if metadata.filename in existing_filenames:
+                    logger.warning(f"图片文件名已存在: {metadata.filename}")
+                    return False
+
+                # 检查是否已存在（基于内容哈希）
+                content_hash = metadata.metadata.get("content_hash") if metadata.metadata else None
+                if content_hash:
+                    existing_hashes = {
+                        img.get("metadata", {}).get("content_hash")
+                        for img in data.get("images", [])
+                        if img.get("metadata", {}).get("content_hash")
+                    }
+                    if content_hash in existing_hashes:
+                        logger.warning(f"图片内容已存在（哈希: {content_hash[:16]}...）")
+                        return False
 
                 # 添加新元数据
                 data.setdefault("images", []).append(metadata.model_dump())
@@ -130,6 +148,30 @@ class ImageMetadataService:
 
         except Exception as e:
             logger.error(f"获取图片详情失败: {e}")
+            return None
+
+    async def find_image_by_hash(self, content_hash: str) -> Optional[ImageMetadata]:
+        """
+        根据内容哈希查找图片
+
+        Args:
+            content_hash: 图片内容的SHA256哈希值
+
+        Returns:
+            图片元数据，不存在返回 None
+        """
+        try:
+            data = await self.storage.load_image_metadata()
+
+            for img in data.get("images", []):
+                img_hash = img.get("metadata", {}).get("content_hash")
+                if img_hash == content_hash:
+                    return ImageMetadata(**img)
+
+            return None
+
+        except Exception as e:
+            logger.error(f"根据哈希查找图片失败: {e}")
             return None
 
     async def list_images(
@@ -1188,6 +1230,7 @@ class ImageMetadataService:
             from PIL import Image
             import uuid
             import shutil
+            import hashlib
 
             source = Path(source_path)
             if not source.exists() or not source.is_file():
@@ -1197,10 +1240,25 @@ class ImageMetadataService:
             # 确保图片目录存在
             self.image_dir.mkdir(parents=True, exist_ok=True)
 
+            # 读取文件内容并计算哈希
+            file_bytes = source.read_bytes()
+            content_hash = hashlib.sha256(file_bytes).hexdigest()
+
+            # 检查是否已导入相同内容的图片
+            existing_image = await self.find_image_by_hash(content_hash)
+            if existing_image:
+                logger.info(f"图片内容已存在，跳过导入: {source.name} (哈希: {content_hash[:16]}...)")
+                return existing_image.id
+
             # 生成新文件名（保留原扩展名）
             image_id = str(uuid.uuid4())
             new_filename = f"{image_id}{source.suffix}"
             dest_path = self.image_dir / new_filename
+
+            # 检查文件是否已存在（理论上不应该，但以防万一）
+            if dest_path.exists():
+                logger.warning(f"目标文件已存在，跳过导入: {new_filename}")
+                return None
 
             # 复制文件
             shutil.copy2(source, dest_path)
@@ -1217,7 +1275,7 @@ class ImageMetadataService:
                 aspect_h = height // gcd_val
                 aspect_ratio = f"{aspect_w}:{aspect_h}"
 
-                # 创建元数据
+                # 创建元数据（包含内容哈希）
                 metadata = ImageMetadata(
                     id=image_id,
                     filename=new_filename,
@@ -1230,7 +1288,7 @@ class ImageMetadataService:
                     height=height,
                     tags=tags or ["导入"],
                     nsfw=False,
-                    metadata={"source": str(source)}
+                    metadata={"source": str(source), "content_hash": content_hash}
                 )
 
                 # 添加元数据

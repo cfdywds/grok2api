@@ -4,6 +4,7 @@ Image Generation API 路由
 
 import asyncio
 import base64
+import hashlib
 import math
 import random
 import re
@@ -331,18 +332,34 @@ async def _save_image_metadata(
             file_path = None
 
             try:
-                # 生成唯一 ID
-                image_id = str(uuid.uuid4())
-                filename = f"{image_id}.jpg"
-                file_path = image_dir / filename
-
                 # 保存图片文件
                 if response_format == "url":
                     # URL 格式，跳过（已经保存在服务器上）
                     continue
                 else:
-                    # base64 格式，解码并保存
+                    # base64 格式，解码
                     image_bytes = base64.b64decode(img_data)
+
+                    # 计算内容哈希
+                    content_hash = hashlib.sha256(image_bytes).hexdigest()
+
+                    # 检查是否已存在相同内容的图片
+                    existing_image = await service.find_image_by_hash(content_hash)
+                    if existing_image:
+                        logger.info(f"图片内容已存在，跳过保存: {content_hash[:16]}...")
+                        continue
+
+                    # 生成唯一 ID
+                    image_id = str(uuid.uuid4())
+                    filename = f"{image_id}.jpg"
+                    file_path = image_dir / filename
+
+                    # 检查文件是否已存在（理论上不应该，但以防万一）
+                    if file_path.exists():
+                        logger.warning(f"文件已存在，跳过: {filename}")
+                        continue
+
+                    # 保存文件
                     file_path.write_bytes(image_bytes)
 
                 # ✨ 关键：将提示词写入图片的 EXIF 数据
@@ -388,7 +405,7 @@ async def _save_image_metadata(
                     height=height,
                     tags=[],
                     nsfw=False,
-                    metadata={},
+                    metadata={"content_hash": content_hash},
                 )
 
                 # 保存元数据
@@ -628,14 +645,14 @@ async def create_image(request: ImageGenerationRequest):
         "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
     }
 
-    # 异步保存元数据
-    asyncio.create_task(_save_image_metadata(
+    # 同步保存元数据（防止竞态条件）
+    await _save_image_metadata(
         selected_images=selected_images,
         prompt=request.prompt,
         model=request.model,
         aspect_ratio=resolve_aspect_ratio(request.size) if use_ws else "1:1",
         response_format=response_format,
-    ))
+    )
 
     return JSONResponse(
         content={
