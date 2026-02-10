@@ -50,6 +50,7 @@ class AnalyzeQualityRequest(BaseModel):
     batch_size: int = 50
     skip_analyzed: bool = False
     max_workers: int = Field(default=8, ge=1, le=16)
+    fast_mode: bool = Field(default=True, description="快速模式（仅检测模糊）")
 
 
 @router.post("/scan")
@@ -152,9 +153,30 @@ async def list_images(
     start_date: Optional[int] = Query(None, description="开始日期（时间戳）"),
     end_date: Optional[int] = Query(None, description="结束日期（时间戳）"),
     nsfw: Optional[bool] = Query(None, description="是否筛选敏感内容"),
+
+    # 质量分数筛选
     min_quality_score: Optional[float] = Query(None, description="最低质量分数筛选"),
     max_quality_score: Optional[float] = Query(None, description="最高质量分数筛选"),
+    quality_level: Optional[str] = Query(None, description="质量等级: excellent, good, fair, poor, very_poor, low_quality"),
+
+    # 快捷筛选预设
+    low_quality: Optional[bool] = Query(None, description="快捷筛选：质量分数<40的低质量图片"),
+
+    # 模糊度筛选
+    min_blur_score: Optional[float] = Query(None, description="最低模糊度分数筛选"),
+    max_blur_score: Optional[float] = Query(None, description="最高模糊度分数筛选"),
+
+    # 亮度筛选
+    min_brightness_score: Optional[float] = Query(None, description="最低亮度分数筛选"),
+    max_brightness_score: Optional[float] = Query(None, description="最高亮度分数筛选"),
+
+    # 质量问题筛选
     has_quality_issues: Optional[bool] = Query(None, description="是否筛选有质量问题的图片"),
+
+    # 快捷筛选
+    only_analyzed: Optional[bool] = Query(None, description="仅显示已分析的图片"),
+    only_unanalyzed: Optional[bool] = Query(None, description="仅显示未分析的图片"),
+
     sort_by: str = Query("created_at", description="排序字段"),
     sort_order: str = Query("desc", description="排序顺序（asc/desc）"),
 ):
@@ -178,7 +200,15 @@ async def list_images(
             nsfw=nsfw,
             min_quality_score=min_quality_score,
             max_quality_score=max_quality_score,
+            quality_level=quality_level,
+            low_quality=low_quality,
+            min_blur_score=min_blur_score,
+            max_blur_score=max_blur_score,
+            min_brightness_score=min_brightness_score,
+            max_brightness_score=max_brightness_score,
             has_quality_issues=has_quality_issues,
+            only_analyzed=only_analyzed,
+            only_unanalyzed=only_unanalyzed,
         )
 
         # 调试日志
@@ -359,6 +389,7 @@ async def analyze_quality(request: AnalyzeQualityRequest):
             batch_size=request.batch_size,
             skip_analyzed=request.skip_analyzed,
             max_workers=request.max_workers,
+            fast_mode=request.fast_mode,
         )
 
         return {
@@ -387,6 +418,25 @@ async def stop_analysis():
     except Exception as e:
         logger.error(f"停止分析失败: {e}")
         raise HTTPException(status_code=500, detail=f"停止分析失败: {str(e)}")
+
+
+@router.get("/check-missing")
+async def check_missing_files():
+    """
+    检查哪些图片的文件已被删除（但元数据还在）
+    """
+    try:
+        service = get_image_metadata_service()
+        result = await service.check_missing_files()
+
+        return {
+            "success": True,
+            "message": f"检查完成: 总计 {result['total']}, 有效 {result['valid']}, 失效 {result['missing']}",
+            "data": result,
+        }
+    except Exception as e:
+        logger.error(f"检查失效图片失败: {e}")
+        raise HTTPException(status_code=500, detail=f"检查失效图片失败: {str(e)}")
 
 
 @router.get("/images/{image_id}/quality")

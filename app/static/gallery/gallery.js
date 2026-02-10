@@ -326,6 +326,90 @@ async function scanLocalImages() {
     }
 }
 
+async function checkMissingFiles() {
+    try {
+        // 显示弹窗
+        const modal = document.getElementById('missing-files-modal');
+        modal.style.display = 'flex';
+
+        // 显示加载状态
+        document.getElementById('missing-summary').innerHTML = '<p>正在检查失效图片...</p>';
+        document.getElementById('missing-list-container').style.display = 'none';
+
+        const response = await fetch(`${API_BASE}/check-missing`);
+        const data = await response.json();
+
+        if (data.success) {
+            const result = data.data;
+            const summary = document.getElementById('missing-summary');
+
+            if (result.missing === 0) {
+                summary.innerHTML = `
+                    <p style="color: #4caf50; font-weight: bold;">✓ 所有图片文件都存在</p>
+                    <p>总计: ${result.total} 张，有效: ${result.valid} 张</p>
+                `;
+            } else {
+                summary.innerHTML = `
+                    <p style="color: #ff9800; font-weight: bold;">⚠ 发现 ${result.missing} 张失效图片</p>
+                    <p>总计: ${result.total} 张，有效: ${result.valid} 张，失效: ${result.missing} 张</p>
+                    <p style="color: #666; font-size: 14px;">这些图片的文件已被删除，但元数据还保留着（包括提示词、评分等）</p>
+                `;
+
+                // 显示失效图片列表
+                const listContainer = document.getElementById('missing-list-container');
+                const list = document.getElementById('missing-files-list');
+                list.innerHTML = '';
+
+                result.missing_images.forEach(img => {
+                    const row = document.createElement('tr');
+                    row.style.borderBottom = '1px solid #eee';
+                    row.innerHTML = `
+                        <td style="padding: 8px; font-family: monospace; font-size: 12px;">${escapeHtml(img.filename)}</td>
+                        <td style="padding: 8px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(img.prompt || '-')}</td>
+                        <td style="padding: 8px; text-align: center;">${img.quality_score !== null ? img.quality_score.toFixed(0) : '-'}</td>
+                    `;
+                    list.appendChild(row);
+                });
+
+                listContainer.style.display = 'block';
+
+                // 保存失效图片ID列表，供删除使用
+                window.missingImageIds = result.missing_images.map(img => img.id);
+            }
+
+            Toast.success(data.message);
+        } else {
+            Toast.error('检查失败，请重试');
+        }
+    } catch (error) {
+        console.error('检查失效图片失败:', error);
+        Toast.error('检查失败，请重试');
+    }
+}
+
+async function scanLocalImages() {
+    try {
+        showLoading();
+        const response = await fetch(`${API_BASE}/scan`, {
+            method: 'POST',
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            Toast.success(data.message);
+            fetchImages();
+            fetchStats();
+        } else {
+            Toast.error('扫描失败，请重试');
+        }
+    } catch (error) {
+        console.error('扫描本地图片失败:', error);
+        Toast.error('扫描失败，请重试');
+    } finally {
+        hideLoading();
+    }
+}
+
 async function analyzeQuality(imageIds = null) {
     try {
         // 显示停止按钮，隐藏分析按钮
@@ -1059,6 +1143,63 @@ function initEventListeners() {
         }
     });
 
+    // 重新分析单张图片
+    document.getElementById('reanalyze-btn').addEventListener('click', async () => {
+        if (!state.currentImageId) return;
+
+        const btn = document.getElementById('reanalyze-btn');
+        const originalText = btn.innerHTML;
+
+        try {
+            // 禁用按钮并显示加载状态
+            btn.disabled = true;
+            btn.innerHTML = '⏳ 分析中...';
+            btn.style.opacity = '0.6';
+
+            // 显示加载提示
+            Toast.info('开始分析图片质量...', '', 2000);
+
+            const response = await fetch(`${API_BASE}/analyze-quality`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image_ids: [state.currentImageId],
+                    update_metadata: true,
+                    batch_size: 1,
+                    skip_analyzed: false,
+                    max_workers: 1,
+                    fast_mode: true
+                }),
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                const result = data.data;
+                if (result.analyzed > 0) {
+                    Toast.success(`分析完成！质量分数已更新`, '', 3000);
+                    // 重新加载图片详情
+                    await showImageDetail(state.currentImageId);
+                    // 刷新列表
+                    fetchImages();
+                } else if (result.failed > 0) {
+                    Toast.error('分析失败，请重试');
+                } else {
+                    Toast.warning('未能分析图片');
+                }
+            } else {
+                Toast.error('分析失败，请重试');
+            }
+        } catch (error) {
+            console.error('重新分析图片失败:', error);
+            Toast.error(`分析失败: ${error.message}`);
+        } finally {
+            // 恢复按钮状态
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            btn.style.opacity = '1';
+        }
+    });
+
     // 添加标签
     document.getElementById('add-tag-btn').addEventListener('click', async () => {
         await addTag();
@@ -1089,6 +1230,11 @@ function initEventListeners() {
     // 同步本地按钮
     document.getElementById('scan-btn').addEventListener('click', async () => {
         await scanLocalImages();
+    });
+
+    // 检查失效图片按钮
+    document.getElementById('check-missing-btn').addEventListener('click', async () => {
+        await checkMissingFiles();
     });
 
     // 质量分析按钮
@@ -1162,6 +1308,50 @@ function initEventListeners() {
         const files = Array.from(e.target.files);
         if (files.length > 0) {
             uploadImages(files);
+        }
+    });
+
+    // 关闭失效图片弹窗
+    document.getElementById('close-missing-modal').addEventListener('click', () => {
+        document.getElementById('missing-files-modal').style.display = 'none';
+    });
+
+    document.getElementById('close-missing-btn').addEventListener('click', () => {
+        document.getElementById('missing-files-modal').style.display = 'none';
+    });
+
+    // 删除所有失效数据
+    document.getElementById('delete-missing-btn').addEventListener('click', async () => {
+        if (!window.missingImageIds || window.missingImageIds.length === 0) {
+            Toast.warning('没有失效图片需要删除');
+            return;
+        }
+
+        const confirmed = await ConfirmDialog.show({
+            title: '确认删除失效数据',
+            message: `确定要删除 ${window.missingImageIds.length} 条失效图片的元数据吗？\n\n注意：这只会删除元数据（提示词、评分等），不会删除任何实际文件。`,
+            icon: '🗑️',
+            confirmText: '删除元数据',
+            cancelText: '取消',
+            confirmClass: 'btn-danger'
+        });
+
+        if (!confirmed) return;
+
+        try {
+            const result = await deleteImages(window.missingImageIds);
+            if (result && result.success) {
+                Toast.success(`已删除 ${window.missingImageIds.length} 条失效数据`);
+                document.getElementById('missing-files-modal').style.display = 'none';
+                fetchImages();
+                fetchStats();
+                window.missingImageIds = [];
+            } else {
+                Toast.error('删除失败，请重试');
+            }
+        } catch (error) {
+            console.error('删除失效数据失败:', error);
+            Toast.error('删除失败，请重试');
         }
     });
 

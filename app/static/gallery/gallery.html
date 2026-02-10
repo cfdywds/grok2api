@@ -107,6 +107,9 @@
                     <button id="scan-btn" class="btn btn-primary" title="扫描本地图片文件夹">
                         <span>🔄</span> 同步本地
                     </button>
+                    <button id="check-missing-btn" class="btn btn-warning" title="检查失效图片">
+                        <span>🔍</span> 检查失效
+                    </button>
                     <button id="upload-btn" class="btn btn-primary" title="上传图片">
                         <span>📤</span> 上传
                     </button>
@@ -298,7 +301,43 @@
                         </div>
                         <div class="modal-actions">
                             <button id="download-btn" class="btn btn-primary">下载</button>
+                            <button id="reanalyze-btn" class="btn btn-warning">🔍 重新分析</button>
                             <button id="delete-single-btn" class="btn btn-danger">删除</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 失效图片检查弹窗 -->
+        <div id="missing-files-modal" class="modal" style="display: none;">
+            <div class="modal-content" style="max-width: 800px;">
+                <span class="modal-close" id="close-missing-modal">&times;</span>
+                <div class="modal-body">
+                    <h3>失效图片检查结果</h3>
+                    <div id="missing-summary" class="info-group">
+                        <p>正在检查...</p>
+                    </div>
+                    <div id="missing-list-container" style="display: none;">
+                        <div class="info-group">
+                            <label>失效图片列表：</label>
+                            <div style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #f5f5f5;">
+                                            <th style="padding: 8px; text-align: left;">文件名</th>
+                                            <th style="padding: 8px; text-align: left;">提示词</th>
+                                            <th style="padding: 8px; text-align: center;">质量分数</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="missing-files-list">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button id="delete-missing-btn" class="btn btn-danger">删除所有失效数据</button>
+                            <button id="close-missing-btn" class="btn btn-secondary">关闭</button>
                         </div>
                     </div>
                 </div>

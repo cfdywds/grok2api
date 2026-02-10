@@ -2064,7 +2064,7 @@ async def admin_img2img(
         "returnImageBytes": False,
         "returnRawGrokInXaiRequest": False,
         "enableImageStreaming": True,
-        "imageGenerationCount": 2,
+        "imageGenerationCount": edit_request.n,  # 使用用户指定的数量
         "forceConcise": False,
         "toolOverrides": {"imageGen": True},
         "enableSideBySide": True,
@@ -2100,7 +2100,7 @@ async def admin_img2img(
                 yield chunk
             # 消费 token
             try:
-                await token_mgr.consume(token, EffortType.IMAGE)
+                await token_mgr.consume(token, EffortType.HIGH)
             except Exception as e:
                 logger.warning(f"Failed to consume token: {e}")
 
@@ -2144,17 +2144,19 @@ async def admin_img2img(
 
     # 消费 token
     try:
-        await token_mgr.consume(token, EffortType.IMAGE)
+        await token_mgr.consume(token, EffortType.HIGH)
     except Exception as e:
         logger.warning(f"Failed to consume token: {e}")
 
     # 选择图片
+    logger.info(f"图生图收集到的图片数量: {len(all_images)}, 请求数量: {n}")
     if len(all_images) >= n:
         selected_images = random.sample(all_images, n)
     else:
         selected_images = all_images.copy()
         while len(selected_images) < n:
             selected_images.append("error")
+    logger.info(f"图生图选择的图片数量: {len(selected_images)}, 包含error: {selected_images.count('error')}")
 
     # 保存图片元数据到图片管理系统
     try:

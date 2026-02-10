@@ -365,25 +365,29 @@ async function generateImagesStream(prompt, count, format) {
       try {
         const event = JSON.parse(data);
 
-        if (event.data && event.data.length > 0) {
-          for (const item of event.data) {
-            const imageData = item.b64_json || item.base64 || item.url;
+        // 处理完成事件（包含实际图片数据）
+        if (event.type === 'image_generation.completed') {
+          const imageData = event.b64_json || event.base64 || event.url;
 
-            if (imageData && imageData !== 'error') {
-              const dataUrl = imageData.startsWith('data:') ? imageData : `data:image/png;base64,${imageData}`;
-              state.generatedImages.push({
-                data: dataUrl,
-                filename: `img2img_${Date.now()}_${++imageCount}.png`
-              });
+          if (imageData && imageData !== 'error') {
+            const dataUrl = imageData.startsWith('data:') ? imageData : `data:image/png;base64,${imageData}`;
+            state.generatedImages.push({
+              data: dataUrl,
+              filename: `img2img_${Date.now()}_${++imageCount}.png`
+            });
 
-              // 实时更新 UI
-              updateUI();
+            // 实时更新 UI
+            updateUI();
 
-              // 显示结果区域
-              document.getElementById('loadingState').style.display = 'none';
-              document.getElementById('resultGrid').style.display = 'grid';
-            }
+            // 显示结果区域
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('resultGrid').style.display = 'grid';
           }
+        }
+        // 处理进度事件（仅显示进度，不包含图片数据）
+        else if (event.type === 'image_generation.partial_image') {
+          // 可以在这里添加进度显示逻辑
+          console.log(`图片 ${event.index} 生成进度: ${event.progress}%`);
         }
       } catch (e) {
         console.error('解析事件失败:', e);

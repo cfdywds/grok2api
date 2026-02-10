@@ -35,9 +35,29 @@ class ImageFilter(BaseModel):
     start_date: Optional[int] = Field(None, description="开始日期（时间戳）")
     end_date: Optional[int] = Field(None, description="结束日期（时间戳）")
     nsfw: Optional[bool] = Field(None, description="是否筛选敏感内容")
+
+    # 质量分数筛选
     min_quality_score: Optional[float] = Field(None, description="最低质量分数筛选")
     max_quality_score: Optional[float] = Field(None, description="最高质量分数筛选")
+    quality_level: Optional[str] = Field(None, description="质量等级快捷筛选: excellent(90-100), good(70-89), fair(40-69), poor(20-39), very_poor(0-19), low_quality(<40)")
+
+    # 快捷筛选预设
+    low_quality: Optional[bool] = Field(None, description="快捷筛选：质量分数<40的低质量图片")
+
+    # 模糊度筛选
+    min_blur_score: Optional[float] = Field(None, description="最低模糊度分数筛选（越高越清晰）")
+    max_blur_score: Optional[float] = Field(None, description="最高模糊度分数筛选")
+
+    # 亮度筛选
+    min_brightness_score: Optional[float] = Field(None, description="最低亮度分数筛选")
+    max_brightness_score: Optional[float] = Field(None, description="最高亮度分数筛选")
+
+    # 质量问题筛选
     has_quality_issues: Optional[bool] = Field(None, description="是否筛选有质量问题的图片")
+
+    # 快捷筛选
+    only_analyzed: Optional[bool] = Field(None, description="仅显示已分析的图片")
+    only_unanalyzed: Optional[bool] = Field(None, description="仅显示未分析的图片")
 
 
 class ImageListResponse(BaseModel):

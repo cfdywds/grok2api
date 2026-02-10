@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.core.storage import get_storage
 from app.core.logger import logger
 from .models import ImageMetadata, ImageListResponse, ImageFilter, ImageStats
+from .backup import get_backup_service
 
 # 添加项目根目录到路径，以便导入 advanced_image_analyzer
 project_root = Path(__file__).parent.parent.parent.parent
@@ -25,6 +26,13 @@ except ImportError:
     ADVANCED_ANALYZER_AVAILABLE = False
     logger.warning("高级图片分析器不可用，将使用基础分析器")
 
+try:
+    from simple_object_detector import SimpleObjectDetector
+    SIMPLE_DETECTOR_AVAILABLE = True
+except ImportError:
+    SIMPLE_DETECTOR_AVAILABLE = False
+    logger.warning("简单物体检测器不可用")
+
 
 class ImageMetadataService:
     """图片元数据管理服务"""
@@ -35,6 +43,9 @@ class ImageMetadataService:
 
         # 初始化高级图片分析器（懒加载）
         self._analyzer = None
+
+        # 初始化简单物体检测器（懒加载）
+        self._object_detector = None
 
         # 分析停止标志
         self._stop_analysis = False
@@ -54,6 +65,17 @@ class ImageMetadataService:
                     logger.error(f"图片分析器初始化失败: {e2}")
                     self._analyzer = None
         return self._analyzer
+
+    def _get_object_detector(self):
+        """获取简单物体检测器实例（懒加载）"""
+        if self._object_detector is None and SIMPLE_DETECTOR_AVAILABLE:
+            try:
+                self._object_detector = SimpleObjectDetector()
+                logger.info("[OK] 简单物体检测器初始化成功")
+            except Exception as e:
+                logger.error(f"物体检测器初始化失败: {e}")
+                self._object_detector = None
+        return self._object_detector
 
     async def add_image(self, metadata: ImageMetadata) -> bool:
         """
@@ -237,6 +259,34 @@ class ImageMetadataService:
                 if img.get("nsfw", False) == filters.nsfw
             ]
 
+        # 快捷筛选：低质量图片（分数<40）
+        if filters.low_quality:
+            before_count = len(filtered)
+            filtered = [
+                img for img in filtered
+                if img.get("quality_score") is not None and img.get("quality_score") < 40
+            ]
+            logger.info(f"low_quality=True 筛选: {before_count} -> {len(filtered)}")
+
+        # 质量等级快捷筛选
+        if filters.quality_level:
+            quality_ranges = {
+                "excellent": (90, 100),
+                "good": (70, 89),
+                "fair": (40, 69),
+                "poor": (20, 39),
+                "very_poor": (0, 19),
+                "low_quality": (0, 39)  # 新增：低质量（<40）
+            }
+            if filters.quality_level in quality_ranges:
+                min_score, max_score = quality_ranges[filters.quality_level]
+                before_count = len(filtered)
+                filtered = [
+                    img for img in filtered
+                    if img.get("quality_score") is not None and min_score <= img.get("quality_score") <= max_score
+                ]
+                logger.info(f"quality_level={filters.quality_level} 筛选: {before_count} -> {len(filtered)}")
+
         # 质量分数筛选
         if filters.min_quality_score is not None:
             before_count = len(filtered)
@@ -250,9 +300,43 @@ class ImageMetadataService:
             before_count = len(filtered)
             filtered = [
                 img for img in filtered
-                if img.get("quality_score") is not None and img.get("quality_score") <= filters.max_quality_score
+                if img.get("quality_score") is not None and img.get("quality_score") < filters.max_quality_score
             ]
             logger.info(f"max_quality_score={filters.max_quality_score} 筛选: {before_count} -> {len(filtered)}")
+
+        # 模糊度筛选
+        if filters.min_blur_score is not None:
+            before_count = len(filtered)
+            filtered = [
+                img for img in filtered
+                if img.get("blur_score") is not None and img.get("blur_score") >= filters.min_blur_score
+            ]
+            logger.info(f"min_blur_score={filters.min_blur_score} 筛选: {before_count} -> {len(filtered)}")
+
+        if filters.max_blur_score is not None:
+            before_count = len(filtered)
+            filtered = [
+                img for img in filtered
+                if img.get("blur_score") is not None and img.get("blur_score") <= filters.max_blur_score
+            ]
+            logger.info(f"max_blur_score={filters.max_blur_score} 筛选: {before_count} -> {len(filtered)}")
+
+        # 亮度筛选
+        if filters.min_brightness_score is not None:
+            before_count = len(filtered)
+            filtered = [
+                img for img in filtered
+                if img.get("brightness_score") is not None and img.get("brightness_score") >= filters.min_brightness_score
+            ]
+            logger.info(f"min_brightness_score={filters.min_brightness_score} 筛选: {before_count} -> {len(filtered)}")
+
+        if filters.max_brightness_score is not None:
+            before_count = len(filtered)
+            filtered = [
+                img for img in filtered
+                if img.get("brightness_score") is not None and img.get("brightness_score") <= filters.max_brightness_score
+            ]
+            logger.info(f"max_brightness_score={filters.max_brightness_score} 筛选: {before_count} -> {len(filtered)}")
 
         # 质量问题筛选
         if filters.has_quality_issues is not None:
@@ -268,6 +352,23 @@ class ImageMetadataService:
                     img for img in filtered
                     if not img.get("quality_issues") or len(img.get("quality_issues", [])) == 0
                 ]
+
+        # 快捷筛选
+        if filters.only_analyzed:
+            before_count = len(filtered)
+            filtered = [
+                img for img in filtered
+                if img.get("quality_score") is not None
+            ]
+            logger.info(f"only_analyzed=True 筛选: {before_count} -> {len(filtered)}")
+
+        if filters.only_unanalyzed:
+            before_count = len(filtered)
+            filtered = [
+                img for img in filtered
+                if img.get("quality_score") is None
+            ]
+            logger.info(f"only_unanalyzed=True 筛选: {before_count} -> {len(filtered)}")
 
         return filtered
 
@@ -492,9 +593,63 @@ class ImageMetadataService:
             logger.error(f"清理孤立元数据失败: {e}")
             return 0
 
+    async def check_missing_files(self) -> Dict[str, Any]:
+        """
+        检查哪些图片的文件已被删除（但元数据还在）
+
+        Returns:
+            包含失效图片列表的字典
+        """
+        try:
+            data = await self.storage.load_image_metadata()
+            images = data.get("images", [])
+
+            missing_images = []
+            valid_count = 0
+
+            for img in images:
+                filename = img.get("filename")
+                if not filename:
+                    continue
+
+                file_path = self.image_dir / filename
+                if not file_path.exists():
+                    # 文件不存在，添加到失效列表
+                    missing_images.append({
+                        "id": img.get("id"),
+                        "filename": filename,
+                        "prompt": img.get("prompt", ""),
+                        "quality_score": img.get("quality_score"),
+                        "created_at": img.get("created_at"),
+                        "file_size": img.get("file_size", 0),
+                    })
+                else:
+                    valid_count += 1
+
+            return {
+                "total": len(images),
+                "valid": valid_count,
+                "missing": len(missing_images),
+                "missing_images": missing_images
+            }
+
+        except Exception as e:
+            logger.error(f"检查失效图片失败: {e}")
+            return {
+                "total": 0,
+                "valid": 0,
+                "missing": 0,
+                "missing_images": []
+            }
+
     async def scan_local_images(self) -> Dict[str, Any]:
         """
         扫描本地图片文件夹，为没有元数据的图片创建元数据
+
+        注意：
+        1. 只会为没有元数据的图片创建新记录，不会覆盖已有的元数据
+        2. 优先从图片的 EXIF 数据中读取提示词
+        3. 如果 EXIF 中没有提示词，则使用默认的"本地导入"
 
         Returns:
             扫描结果统计
@@ -502,6 +657,10 @@ class ImageMetadataService:
         try:
             from PIL import Image
             import uuid
+            from .exif_manager import get_exif_manager
+
+            # 获取 EXIF 管理器
+            exif_manager = get_exif_manager()
 
             async with self.storage.acquire_lock("image_metadata", timeout=10):
                 data = await self.storage.load_image_metadata()
@@ -517,6 +676,7 @@ class ImageMetadataService:
                 added_count = 0
                 skipped_count = 0
                 failed_count = 0
+                restored_from_exif = 0
 
                 # 支持的图片格式
                 image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
@@ -529,12 +689,15 @@ class ImageMetadataService:
                     if file_path.suffix.lower() not in image_extensions:
                         continue
 
-                    # 如果已有元数据，跳过
+                    # 如果已有元数据，跳过（不覆盖）
                     if file_path.name in existing_filenames:
                         skipped_count += 1
                         continue
 
                     try:
+                        # ✨ 关键：尝试从图片的 EXIF 数据中读取元数据
+                        exif_metadata = exif_manager.read_metadata_from_image(file_path)
+
                         # 读取图片信息
                         with Image.open(file_path) as img:
                             width, height = img.size
@@ -547,18 +710,34 @@ class ImageMetadataService:
                             aspect_h = height // gcd_val
                             aspect_ratio = f"{aspect_w}:{aspect_h}"
 
+                            # 如果 EXIF 中有元数据，使用 EXIF 中的信息
+                            if exif_metadata and "prompt" in exif_metadata:
+                                prompt = exif_metadata.get("prompt", f"本地导入: {file_path.stem}")
+                                model = exif_metadata.get("model", "grok-imagine-1.0")
+                                exif_aspect_ratio = exif_metadata.get("aspect_ratio", aspect_ratio)
+                                tags = []
+                                restored_from_exif += 1
+                                logger.info(f"从 EXIF 恢复元数据: {file_path.name}")
+                            else:
+                                # 如果 EXIF 中没有元数据，使用默认值
+                                prompt = f"本地导入: {file_path.stem}"
+                                model = "local-import"
+                                exif_aspect_ratio = aspect_ratio
+                                tags = ["本地导入"]
+
                             # 创建元数据
+                            # 使用文件名（去掉扩展名）作为 id，确保 id 和 filename 匹配
                             metadata = ImageMetadata(
-                                id=str(uuid.uuid4()),
+                                id=file_path.stem,
                                 filename=file_path.name,
-                                prompt=f"本地导入: {file_path.stem}",
-                                model="local-import",
-                                aspect_ratio=aspect_ratio,
+                                prompt=prompt,
+                                model=model,
+                                aspect_ratio=exif_aspect_ratio,
                                 created_at=created_at,
                                 file_size=file_size,
                                 width=width,
                                 height=height,
-                                tags=["本地导入"],
+                                tags=tags,
                                 nsfw=False,
                                 metadata={}
                             )
@@ -576,12 +755,13 @@ class ImageMetadataService:
                 if added_count > 0:
                     data["images"] = images
                     await self.storage.save_image_metadata(data)
-                    logger.info(f"扫描完成: 新增 {added_count}, 跳过 {skipped_count}, 失败 {failed_count}")
+                    logger.info(f"扫描完成: 新增 {added_count}, 跳过 {skipped_count}, 失败 {failed_count}, 从EXIF恢复 {restored_from_exif}")
 
                 return {
                     "added": added_count,
                     "skipped": skipped_count,
                     "failed": failed_count,
+                    "restored_from_exif": restored_from_exif,
                     "total": added_count + skipped_count + failed_count
                 }
 
@@ -591,6 +771,7 @@ class ImageMetadataService:
                 "added": 0,
                 "skipped": 0,
                 "failed": 0,
+                "restored_from_exif": 0,
                 "total": 0,
                 "error": str(e)
             }
@@ -717,7 +898,8 @@ class ImageMetadataService:
         update_metadata: bool = True,
         batch_size: int = 50,
         skip_analyzed: bool = False,
-        max_workers: int = 8
+        max_workers: int = 8,
+        fast_mode: bool = True
     ) -> Dict[str, Any]:
         """
         批量分析图片质量
@@ -728,6 +910,7 @@ class ImageMetadataService:
             batch_size: 批处理大小
             skip_analyzed: 是否跳过已分析的图片
             max_workers: 并发线程数（1-16）
+            fast_mode: 是否使用快速模式（仅检测模糊，默认True）
 
         Returns:
             分析结果统计
@@ -788,7 +971,8 @@ class ImageMetadataService:
                     "stopped": False
                 }
 
-            logger.info(f"开始批量分析图片质量: 共 {total} 张，并发数 {max_workers}")
+            mode_name = "快速模式（检测物体）" if fast_mode else "完整模式（综合分析）"
+            logger.info(f"开始批量分析图片质量: 共 {total} 张，并发数 {max_workers}，模式: {mode_name}")
 
             # 分批处理
             for i in range(0, total, batch_size):
@@ -810,7 +994,7 @@ class ImageMetadataService:
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     # 提交所有任务
                     future_to_id = {
-                        executor.submit(self._analyze_image_sync, img_id): img_id
+                        executor.submit(self._analyze_image_sync, img_id, fast_mode): img_id
                         for img_id in batch_ids
                     }
 
@@ -931,10 +1115,14 @@ class ImageMetadataService:
             logger.error(f"更新质量元数据失败 {image_id}: {e}")
             return False
 
-    def _analyze_image_sync(self, image_id: str) -> Optional[Dict[str, Any]]:
+    def _analyze_image_sync(self, image_id: str, fast_mode: bool = True) -> Optional[Dict[str, Any]]:
         """
         线程池执行的同步包装器
         为每个线程创建独立的事件循环来执行异步操作
+
+        Args:
+            image_id: 图片ID
+            fast_mode: 是否使用快速模式（仅检测模糊）
         """
         try:
             # 为线程创建新的事件循环
@@ -956,16 +1144,31 @@ class ImageMetadataService:
                 return None
 
             # 执行分析（CPU 密集型操作）
-            analyzer = self._get_analyzer()
-            if analyzer:
-                result = analyzer.comprehensive_analysis(str(file_path))
-                return {
-                    "quality_score": result["final_score"],
-                    "blur_score": result["technical"].get("sharpness", 0),
-                    "brightness_score": result["technical"].get("brightness", 0),
-                    "quality_issues": result["issues"]
-                }
-            return None
+            if fast_mode:
+                # 快速模式：仅检测物体
+                detector = self._get_object_detector()
+                if detector:
+                    result = detector.detect(str(file_path))
+                    if result.get("success"):
+                        return {
+                            "quality_score": result["quality_score"],
+                            "blur_score": result["blur_score"],
+                            "brightness_score": result["brightness_score"],
+                            "quality_issues": result["quality_issues"]
+                        }
+                return None
+            else:
+                # 完整模式：综合分析
+                analyzer = self._get_analyzer()
+                if analyzer:
+                    result = analyzer.comprehensive_analysis(str(file_path))
+                    return {
+                        "quality_score": result["final_score"],
+                        "blur_score": result["technical"].get("sharpness", 0),
+                        "brightness_score": result["technical"].get("brightness", 0),
+                        "quality_issues": result["issues"]
+                    }
+                return None
         except Exception as e:
             logger.error(f"同步分析失败 {image_id}: {e}")
             return None

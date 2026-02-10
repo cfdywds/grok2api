@@ -313,6 +313,10 @@ async def _save_image_metadata(
         image_dir = Path(__file__).parent.parent.parent.parent / "data" / "tmp" / "image"
         image_dir.mkdir(parents=True, exist_ok=True)
 
+        # 导入 EXIF 管理器
+        from app.services.gallery.exif_manager import get_exif_manager
+        exif_manager = get_exif_manager()
+
         for img_data in selected_images:
             if img_data == "error" or not img_data:
                 continue
@@ -334,6 +338,18 @@ async def _save_image_metadata(
                     # base64 格式，解码并保存
                     image_bytes = base64.b64decode(img_data)
                     file_path.write_bytes(image_bytes)
+
+                # ✨ 关键：将提示词写入图片的 EXIF 数据
+                exif_manager.write_metadata_to_image(
+                    image_path=file_path,
+                    prompt=prompt,
+                    model=model,
+                    aspect_ratio=aspect_ratio,
+                    additional_metadata={
+                        "image_id": image_id,
+                        "created_at": int(time.time() * 1000)
+                    }
+                )
 
                 # 获取文件信息
                 file_size = file_path.stat().st_size if file_path.exists() else 0
@@ -786,7 +802,7 @@ async def edit_image(
         "returnImageBytes": False,
         "returnRawGrokInXaiRequest": False,
         "enableImageStreaming": True,
-        "imageGenerationCount": 2,
+        "imageGenerationCount": edit_request.n,  # 使用用户指定的数量
         "forceConcise": False,
         "toolOverrides": {"imageGen": True},
         "enableSideBySide": True,
@@ -866,6 +882,20 @@ async def edit_image(
             selected_images.append("error")
 
     data = [{response_field: img} for img in selected_images]
+
+    # 异步保存元数据（图生图）
+    asyncio.create_task(_save_image_metadata(
+        selected_images=selected_images,
+        prompt=edit_request.prompt,
+        model=edit_request.model,
+        aspect_ratio=resolve_aspect_ratio(edit_request.size),
+        response_format=response_format,
+    ))
+
+    try:
+        await token_mgr.consume(token, _get_effort(model_info))
+    except Exception as e:
+        logger.warning(f"Failed to consume token: {e}")
 
     return JSONResponse(
         content={

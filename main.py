@@ -30,6 +30,7 @@ from app.api.v1.image import router as image_router  # noqa: E402
 from app.api.v1.files import router as files_router  # noqa: E402
 from app.api.v1.models import router as models_router  # noqa: E402
 from app.api.v1.gallery import router as gallery_router  # noqa: E402
+from app.api.v1.gallery_backup import router as gallery_backup_router  # noqa: E402
 from app.services.token import get_scheduler  # noqa: E402
 
 
@@ -115,6 +116,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(files_router, prefix="/v1/files")
     app.include_router(gallery_router)
+    app.include_router(gallery_backup_router, prefix="/api/v1/gallery")
 
     # 静态文件服务
     from fastapi.staticfiles import StaticFiles
