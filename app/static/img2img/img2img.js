@@ -114,9 +114,15 @@ function initEventListeners() {
 function handleFiles(files) {
   if (files.length === 0) return;
 
+  // 替换模式：清空之前的图片
+  // 如果当前已有图片，重新上传时自动清空
+  if (state.uploadedFiles.length > 0) {
+    state.uploadedFiles = [];
+    Toast.info('已清空之前的图片');
+  }
+
   // 检查文件数量
-  const totalFiles = state.uploadedFiles.length + files.length;
-  if (totalFiles > 16) {
+  if (files.length > 16) {
     Toast.error('最多只能上传 16 张图片');
     return;
   }
@@ -125,6 +131,7 @@ function handleFiles(files) {
   const maxSize = 50 * 1024 * 1024; // 50MB
   const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
 
+  let validFilesCount = 0;
   for (const file of files) {
     if (!allowedTypes.includes(file.type)) {
       Toast.error(`不支持的文件格式: ${file.name}`);
@@ -135,6 +142,8 @@ function handleFiles(files) {
       Toast.error(`文件过大: ${file.name} (最大 50MB)`);
       continue;
     }
+
+    validFilesCount++;
 
     // 读取文件
     const reader = new FileReader();
@@ -147,6 +156,10 @@ function handleFiles(files) {
       updateUI();
     };
     reader.readAsDataURL(file);
+  }
+
+  if (validFilesCount > 0) {
+    Toast.success(`已上传 ${validFilesCount} 张图片`);
   }
 }
 
