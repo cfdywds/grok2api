@@ -36,6 +36,29 @@
                 <div class="settings-prompt">
                   <label class="field-label" for="promptInput">提示词</label>
                   <textarea id="promptInput" class="geist-input imagine-textarea" placeholder="描述你想要的画面，例如：未来城市霓虹雨夜，广角摄影"></textarea>
+                  <div class="prompt-optimization-section">
+                    <button id="optimizePromptBtn" class="geist-button-outline optimize-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                        <path d="M2 17l10 5 10-5"></path>
+                        <path d="M2 12l10 5 10-5"></path>
+                      </svg>
+                      <span>优化提示词</span>
+                    </button>
+                  </div>
+                  <!-- 优化后的提示词显示区域 -->
+                  <div id="optimizedPromptDisplay" class="optimized-prompt-display" style="display: none;">
+                    <div class="optimized-prompt-header">
+                      <span class="optimized-prompt-label">优化后的提示词</span>
+                      <button id="useOptimizedPromptInline" class="use-optimized-btn">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                        使用
+                      </button>
+                    </div>
+                    <div id="optimizedPromptContent" class="optimized-prompt-content"></div>
+                  </div>
                 </div>
                 <div class="settings-options">
                   <div>
@@ -191,6 +214,43 @@
     <div id="selectionToolbar" class="selection-toolbar hidden">
       <button id="toggleSelectAllBtn" class="geist-button-outline text-xs px-3 gap-1 border-0 hover:bg-gray-100">全选</button>
       <button id="downloadSelectedBtn" class="geist-button-outline text-xs px-3 gap-1 border-0 hover:bg-gray-100">下载 <span id="selectedCount" class="selected-count">0</span></button>
+    </div>
+  </div>
+
+  <!-- 提示词优化模态框 -->
+  <div id="promptModal" class="prompt-modal">
+    <div class="prompt-modal-content">
+      <div class="prompt-modal-header">
+        <h3>提示词优化结果</h3>
+        <button class="prompt-modal-close" id="closePromptModal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="prompt-modal-body">
+        <div class="prompt-section">
+          <label class="prompt-label">原始提示词</label>
+          <div class="prompt-text" id="originalPromptText"></div>
+        </div>
+        <div class="prompt-section">
+          <label class="prompt-label">优化后的提示词</label>
+          <div class="prompt-text optimized" id="optimizedPromptText"></div>
+        </div>
+        <div class="prompt-section">
+          <label class="prompt-label">优化说明</label>
+          <div class="prompt-explanation" id="promptExplanation"></div>
+        </div>
+        <div class="prompt-section">
+          <label class="prompt-label">改进点</label>
+          <ul class="improvements-list" id="improvementsList"></ul>
+        </div>
+      </div>
+      <div class="prompt-modal-footer">
+        <button class="geist-button-outline" id="cancelOptimization">取消</button>
+        <button class="geist-button-primary" id="useOptimizedPrompt">使用优化结果</button>
+      </div>
     </div>
   </div>
 

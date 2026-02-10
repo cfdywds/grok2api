@@ -31,6 +31,7 @@ from app.api.v1.files import router as files_router  # noqa: E402
 from app.api.v1.models import router as models_router  # noqa: E402
 from app.api.v1.gallery import router as gallery_router  # noqa: E402
 from app.api.v1.gallery_backup import router as gallery_backup_router  # noqa: E402
+from app.api.v1.prompt import router as prompt_router  # noqa: E402
 from app.services.token import get_scheduler  # noqa: E402
 
 
@@ -113,6 +114,9 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         models_router, prefix="/v1", dependencies=[Depends(verify_api_key)]
+    )
+    app.include_router(
+        prompt_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)]
     )
     app.include_router(files_router, prefix="/v1/files")
     app.include_router(gallery_router)

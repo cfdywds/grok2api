@@ -1042,3 +1042,245 @@
     });
   }
 })();
+
+// Prompt optimization functionality
+(() => {
+  const optimizePromptBtn = document.getElementById('optimizePromptBtn');
+  const promptInput = document.getElementById('promptInput');
+  const promptModal = document.getElementById('promptModal');
+  const closePromptModal = document.getElementById('closePromptModal');
+  const cancelOptimization = document.getElementById('cancelOptimization');
+  const useOptimizedPrompt = document.getElementById('useOptimizedPrompt');
+  const originalPromptText = document.getElementById('originalPromptText');
+  const optimizedPromptText = document.getElementById('optimizedPromptText');
+  const promptExplanation = document.getElementById('promptExplanation');
+  const improvementsList = document.getElementById('improvementsList');
+
+  // 新增：内联显示元素
+  const optimizedPromptDisplay = document.getElementById('optimizedPromptDisplay');
+  const optimizedPromptContent = document.getElementById('optimizedPromptContent');
+  const useOptimizedPromptInline = document.getElementById('useOptimizedPromptInline');
+
+  let currentOptimizedPrompt = '';
+
+  function showPromptModal() {
+    if (promptModal) {
+      promptModal.classList.add('active');
+    }
+  }
+
+  function hidePromptModal() {
+    if (promptModal) {
+      promptModal.classList.remove('active');
+    }
+  }
+
+  // 新增：显示内联优化结果
+  function showOptimizedPromptInline(optimizedPrompt) {
+    if (optimizedPromptDisplay && optimizedPromptContent) {
+      optimizedPromptContent.textContent = optimizedPrompt;
+      optimizedPromptDisplay.style.display = 'block';
+    }
+  }
+
+  // 新增：隐藏内联优化结果
+  function hideOptimizedPromptInline() {
+    if (optimizedPromptDisplay) {
+      optimizedPromptDisplay.style.display = 'none';
+    }
+  }
+
+  function displayOptimizationResult(result) {
+    // 显示在模态框中
+    if (originalPromptText) {
+      originalPromptText.textContent = result.original_prompt;
+    }
+    if (optimizedPromptText) {
+      optimizedPromptText.textContent = result.optimized_prompt;
+    }
+    if (promptExplanation) {
+      promptExplanation.textContent = result.explanation;
+    }
+    if (improvementsList) {
+      improvementsList.innerHTML = '';
+      (result.improvements || []).forEach(improvement => {
+        const li = document.createElement('li');
+        li.textContent = improvement;
+        improvementsList.appendChild(li);
+      });
+    }
+    currentOptimizedPrompt = result.optimized_prompt;
+
+    // 新增：同时显示在输入框下方
+    showOptimizedPromptInline(result.optimized_prompt);
+  }
+
+  async function optimizePrompt() {
+    console.log('[优化] 开始优化流程');
+    const prompt = promptInput ? promptInput.value.trim() : '';
+    console.log('[优化] 提示词:', prompt);
+
+    if (!prompt) {
+      console.warn('[优化] 提示词为空');
+      if (typeof showToast === 'function') {
+        showToast('请先输入提示词', 'warning');
+      } else {
+        alert('请先输入提示词');
+      }
+      return;
+    }
+
+    // Disable button and show loading state
+    if (optimizePromptBtn) {
+      console.log('[优化] 禁用按钮，显示加载状态');
+      optimizePromptBtn.disabled = true;
+      const originalText = optimizePromptBtn.innerHTML;
+      optimizePromptBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
+          <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+        </svg>
+        <span>优化中...</span>
+      `;
+
+      try {
+        console.log('[优化] 检查 ensureApiKey 函数:', typeof ensureApiKey);
+        if (typeof ensureApiKey !== 'function') {
+          throw new Error('ensureApiKey 函数不存在，请检查 admin-auth.js 是否正确加载');
+        }
+
+        console.log('[优化] 获取 API Key...');
+        const apiKey = await ensureApiKey();
+        console.log('[优化] API Key 获取结果:', apiKey ? '成功' : '失败');
+
+        if (apiKey === null) {
+          console.error('[优化] 未获取到 API Key');
+          if (typeof showToast === 'function') {
+            showToast('请先登录后台 (/admin)', 'error');
+          } else {
+            alert('请先访问 /admin 页面登录后台');
+          }
+          return;
+        }
+
+        console.log('[优化] 检查 buildAuthHeaders 函数:', typeof buildAuthHeaders);
+        if (typeof buildAuthHeaders !== 'function') {
+          throw new Error('buildAuthHeaders 函数不存在');
+        }
+
+        console.log('[优化] 准备发送 API 请求...');
+        const requestBody = {
+          prompt: prompt,
+          context: 'imagine',
+          language: 'auto'
+        };
+        console.log('[优化] 请求体:', requestBody);
+
+        const response = await fetch('/api/v1/prompt/optimize', {
+          method: 'POST',
+          headers: {
+            ...buildAuthHeaders(apiKey),
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        console.log('[优化] API 响应状态:', response.status);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[优化] API 错误响应:', errorText);
+          throw new Error(`API 请求失败 (${response.status}): ${errorText}`);
+        }
+
+        console.log('[优化] 解析响应 JSON...');
+        const result = await response.json();
+        console.log('[优化] 优化结果:', result);
+
+        console.log('[优化] 显示优化结果...');
+        displayOptimizationResult(result);
+        showPromptModal();
+        console.log('[优化] 优化流程完成');
+
+      } catch (error) {
+        console.error('[优化] 错误:', error);
+        console.error('[优化] 错误堆栈:', error.stack);
+
+        const errorMessage = error.message || '优化失败';
+        if (typeof showToast === 'function') {
+          showToast('优化失败: ' + errorMessage, 'error');
+        } else {
+          alert('优化失败: ' + errorMessage + '\n\n请按 F12 打开控制台查看详细错误信息');
+        }
+      } finally {
+        if (optimizePromptBtn) {
+          console.log('[优化] 恢复按钮状态');
+          optimizePromptBtn.disabled = false;
+          optimizePromptBtn.innerHTML = originalText;
+        }
+      }
+    } else {
+      console.error('[优化] 找不到优化按钮元素');
+    }
+  }
+
+  function useOptimization() {
+    if (currentOptimizedPrompt && promptInput) {
+      promptInput.value = currentOptimizedPrompt;
+      hidePromptModal();
+      hideOptimizedPromptInline();
+      if (typeof showToast === 'function') {
+        showToast('已应用优化后的提示词', 'success');
+      }
+    }
+  }
+
+  // Event listeners
+  if (optimizePromptBtn) {
+    optimizePromptBtn.addEventListener('click', optimizePrompt);
+  }
+
+  if (closePromptModal) {
+    closePromptModal.addEventListener('click', hidePromptModal);
+  }
+
+  if (cancelOptimization) {
+    cancelOptimization.addEventListener('click', hidePromptModal);
+  }
+
+  if (useOptimizedPrompt) {
+    useOptimizedPrompt.addEventListener('click', useOptimization);
+  }
+
+  // 新增：内联"使用"按钮事件
+  if (useOptimizedPromptInline) {
+    useOptimizedPromptInline.addEventListener('click', useOptimization);
+  }
+
+  // Close modal when clicking outside
+  if (promptModal) {
+    promptModal.addEventListener('click', (e) => {
+      if (e.target === promptModal) {
+        hidePromptModal();
+      }
+    });
+  }
+
+  // Close modal with Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && promptModal && promptModal.classList.contains('active')) {
+      hidePromptModal();
+    }
+  });
+
+  // 新增：当输入框内容改变时，隐藏优化结果
+  if (promptInput) {
+    promptInput.addEventListener('input', () => {
+      if (optimizedPromptDisplay && optimizedPromptDisplay.style.display !== 'none') {
+        // 如果当前显示的优化结果与输入框内容不同，则隐藏
+        if (promptInput.value.trim() !== currentOptimizedPrompt) {
+          hideOptimizedPromptInline();
+        }
+      }
+    });
+  }
+})();
