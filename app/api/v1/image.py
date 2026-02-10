@@ -738,17 +738,63 @@ async def edit_image(
     token_mgr, token = await _get_token(edit_request.model)
     model_info = ModelService.get(edit_request.model)
 
-    # 上传图片
+    # 上传图片 - 支持token轮换重试
     image_urls: List[str] = []
     upload_service = UploadService()
+    max_token_retries = 3  # 最多尝试3个不同的token
+    current_token = token
+
     try:
-        for image in images:
-            file_id, file_uri = await upload_service.upload(image, token)
-            if file_uri:
-                if file_uri.startswith("http"):
-                    image_urls.append(file_uri)
-                else:
-                    image_urls.append(f"https://assets.grok.com/{file_uri.lstrip('/')}")
+        for image_idx, image in enumerate(images):
+            uploaded = False
+            last_error = None
+
+            # 对每张图片尝试上传，如果遇到403则轮换token重试
+            for retry_idx in range(max_token_retries):
+                try:
+                    file_id, file_uri = await upload_service.upload(image, current_token)
+                    if file_uri:
+                        if file_uri.startswith("http"):
+                            image_urls.append(file_uri)
+                        else:
+                            image_urls.append(f"https://assets.grok.com/{file_uri.lstrip('/')}")
+                        uploaded = True
+                        logger.info(f"图片 {image_idx + 1} 上传成功 (token尝试次数: {retry_idx + 1})")
+                        break
+                except Exception as e:
+                    last_error = e
+                    # 检查是否为403认证错误
+                    is_403_error = False
+                    if hasattr(e, 'details') and isinstance(e.details, dict):
+                        if e.details.get('status') == 403:
+                            is_403_error = True
+                    elif '403' in str(e):
+                        is_403_error = True
+
+                    if is_403_error and retry_idx < max_token_retries - 1:
+                        logger.warning(
+                            f"图片 {image_idx + 1} 上传遇到403错误 (尝试 {retry_idx + 1}/{max_token_retries})，"
+                            f"尝试轮换token重试..."
+                        )
+                        # 获取新的token
+                        try:
+                            token_mgr, new_token = await _get_token(edit_request.model)
+                            if new_token != current_token:
+                                current_token = new_token
+                                logger.info(f"已切换到新token: {current_token[:10]}...")
+                            else:
+                                logger.warning("没有可用的其他token，使用相同token重试")
+                        except Exception as token_err:
+                            logger.error(f"获取新token失败: {token_err}")
+                            raise last_error
+                    else:
+                        # 非403错误或已达到最大重试次数
+                        raise
+
+            if not uploaded:
+                logger.error(f"图片 {image_idx + 1} 上传失败，已尝试 {max_token_retries} 个token")
+                if last_error:
+                    raise last_error
     finally:
         await upload_service.close()
 

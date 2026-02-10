@@ -323,19 +323,73 @@ class VideoService:
         except ValueError as e:
             raise ValidationException(str(e))
 
-        # 处理图片附件
+        # 处理图片附件 - 支持token轮换重试
         image_url = None
         if attachments:
             upload_service = UploadService()
+            max_token_retries = 3  # 最多尝试3个不同的token
+            current_token = token
+
             try:
                 for attach_type, attach_data in attachments:
                     if attach_type == "image":
-                        _, file_uri = await upload_service.upload(attach_data, token)
-                        image_url = f"https://assets.grok.com/{file_uri}"
-                        logger.info(f"Image uploaded for video: {image_url}")
+                        uploaded = False
+                        last_error = None
+
+                        # 尝试上传图片，如果遇到403则轮换token重试
+                        for retry_idx in range(max_token_retries):
+                            try:
+                                _, file_uri = await upload_service.upload(attach_data, current_token)
+                                image_url = f"https://assets.grok.com/{file_uri}"
+                                uploaded = True
+                                logger.info(
+                                    f"Image uploaded for video: {image_url} "
+                                    f"(token尝试次数: {retry_idx + 1})"
+                                )
+                                break
+                            except Exception as e:
+                                last_error = e
+                                # 检查是否为403认证错误
+                                is_403_error = False
+                                if hasattr(e, 'details') and isinstance(e.details, dict):
+                                    if e.details.get('status') == 403:
+                                        is_403_error = True
+                                elif '403' in str(e):
+                                    is_403_error = True
+
+                                if is_403_error and retry_idx < max_token_retries - 1:
+                                    logger.warning(
+                                        f"视频图片上传遇到403错误 (尝试 {retry_idx + 1}/{max_token_retries})，"
+                                        f"尝试轮换token重试..."
+                                    )
+                                    # 获取新的token
+                                    try:
+                                        new_token = None
+                                        for pool_name in ModelService.pool_candidates_for_model(model):
+                                            new_token = token_mgr.get_token(pool_name)
+                                            if new_token and new_token != current_token:
+                                                break
+                                        if new_token and new_token != current_token:
+                                            current_token = new_token
+                                            logger.info(f"已切换到新token: {current_token[:10]}...")
+                                        else:
+                                            logger.warning("没有可用的其他token，使用相同token重试")
+                                    except Exception as token_err:
+                                        logger.error(f"获取新token失败: {token_err}")
+                                        raise last_error
+                                else:
+                                    # 非403错误或已达到最大重试次数
+                                    raise
+
+                        if not uploaded and last_error:
+                            logger.error(f"视频图片上传失败，已尝试 {max_token_retries} 个token")
+                            raise last_error
                         break
             finally:
                 await upload_service.close()
+
+            # 更新token以便后续video生成使用最新的有效token
+            token = current_token
 
         # 生成视频
         service = VideoService()

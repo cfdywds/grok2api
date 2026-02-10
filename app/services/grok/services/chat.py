@@ -341,19 +341,74 @@ class GrokChatService:
         except ValueError as e:
             raise ValidationException(str(e))
 
-        # 上传附件
+        # 上传附件 - 支持token轮换重试
         file_ids = []
         if attachments:
             upload_service = UploadService()
+            max_token_retries = 3  # 最多尝试3个不同的token
+            current_token = token
+
             try:
-                for attach_type, attach_data in attachments:
-                    file_id, _ = await upload_service.upload(attach_data, token)
-                    file_ids.append(file_id)
-                    logger.debug(
-                        f"Attachment uploaded: type={attach_type}, file_id={file_id}"
-                    )
+                for attach_idx, (attach_type, attach_data) in enumerate(attachments):
+                    uploaded = False
+                    last_error = None
+
+                    # 对每个附件尝试上传，如果遇到403则轮换token重试
+                    for retry_idx in range(max_token_retries):
+                        try:
+                            file_id, _ = await upload_service.upload(attach_data, current_token)
+                            file_ids.append(file_id)
+                            uploaded = True
+                            logger.debug(
+                                f"Attachment uploaded: type={attach_type}, file_id={file_id} "
+                                f"(token尝试次数: {retry_idx + 1})"
+                            )
+                            break
+                        except Exception as e:
+                            last_error = e
+                            # 检查是否为403认证错误
+                            is_403_error = False
+                            if hasattr(e, 'details') and isinstance(e.details, dict):
+                                if e.details.get('status') == 403:
+                                    is_403_error = True
+                            elif '403' in str(e):
+                                is_403_error = True
+
+                            if is_403_error and retry_idx < max_token_retries - 1:
+                                logger.warning(
+                                    f"附件 {attach_idx + 1} 上传遇到403错误 (尝试 {retry_idx + 1}/{max_token_retries})，"
+                                    f"尝试轮换token重试..."
+                                )
+                                # 获取新的token
+                                try:
+                                    token_mgr = await get_token_manager()
+                                    await token_mgr.reload_if_stale()
+                                    new_token = None
+                                    for pool_name in ModelService.pool_candidates_for_model(request.model):
+                                        new_token = token_mgr.get_token(pool_name)
+                                        if new_token and new_token != current_token:
+                                            break
+                                    if new_token and new_token != current_token:
+                                        current_token = new_token
+                                        logger.info(f"已切换到新token: {current_token[:10]}...")
+                                    else:
+                                        logger.warning("没有可用的其他token，使用相同token重试")
+                                except Exception as token_err:
+                                    logger.error(f"获取新token失败: {token_err}")
+                                    raise last_error
+                            else:
+                                # 非403错误或已达到最大重试次数
+                                raise
+
+                    if not uploaded:
+                        logger.error(f"附件 {attach_idx + 1} 上传失败，已尝试 {max_token_retries} 个token")
+                        if last_error:
+                            raise last_error
             finally:
                 await upload_service.close()
+
+            # 更新token以便后续chat调用使用最新的有效token
+            token = current_token
 
         stream = (
             request.stream if request.stream is not None else get_config("chat.stream")
