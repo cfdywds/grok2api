@@ -124,14 +124,17 @@ class NSFWService:
         """为单个 token 开启 NSFW 模式"""
         headers = self._build_headers(token)
         payload = self._build_payload()
+        logger.info(f"NSFW enable start for token: {token[:10]}...")
         logger.debug(f"NSFW payload: len={len(payload)} hex={payload.hex()}")
 
         try:
             browser = get_config("security.browser")
             async with AsyncSession(impersonate=browser) as session:
                 # 先设置出生日期
+                logger.info(f"Setting birth date for token: {token[:10]}...")
                 ok, birth_status, birth_err = await self._set_birth_date(session, token)
                 if not ok:
+                    logger.warning(f"Birth date failed for {token[:10]}...: status={birth_status}, error={birth_err}")
                     return NSFWResult(
                         success=False,
                         http_status=birth_status,
@@ -139,6 +142,7 @@ class NSFWService:
                     )
 
                 # 开启 NSFW
+                logger.info(f"Enabling NSFW for token: {token[:10]}...")
                 response = await session.post(
                     NSFW_API,
                     data=payload,
@@ -148,6 +152,7 @@ class NSFWService:
                 )
 
                 if response.status_code != 200:
+                    logger.warning(f"NSFW API failed for {token[:10]}...: HTTP {response.status_code}")
                     return NSFWResult(
                         success=False,
                         http_status=response.status_code,
@@ -160,13 +165,18 @@ class NSFWService:
                 )
 
                 grpc_status = get_grpc_status(trailers)
-                logger.debug(
-                    f"NSFW response: http={response.status_code} grpc={grpc_status.code} "
-                    f"msg={grpc_status.message} trailers={trailers}"
+                logger.info(
+                    f"NSFW response for {token[:10]}...: http={response.status_code} grpc={grpc_status.code} "
+                    f"msg={grpc_status.message}"
                 )
 
                 # HTTP 200 且无 grpc-status（空响应）或 grpc-status=0 都算成功
                 success = grpc_status.code == -1 or grpc_status.ok
+
+                if success:
+                    logger.info(f"NSFW enabled successfully for {token[:10]}...")
+                else:
+                    logger.warning(f"NSFW enable failed for {token[:10]}...: grpc_status={grpc_status.code}, msg={grpc_status.message}")
 
                 return NSFWResult(
                     success=success,
@@ -176,7 +186,7 @@ class NSFWService:
                 )
 
         except Exception as e:
-            logger.error(f"NSFW enable failed: {e}")
+            logger.error(f"NSFW enable exception for {token[:10]}...: {e}")
             return NSFWResult(success=False, http_status=0, error=str(e)[:100])
 
 
