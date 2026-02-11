@@ -256,7 +256,13 @@ async function handleFavoriteClick() {
 async function handleDeleteClick() {
   if (!state.currentImage) return;
 
-  if (!confirm('确定要删除这张图片吗？此操作不可恢复。')) {
+  // 使用自定义确认对话框
+  const confirmed = await showConfirm(
+    '确认删除',
+    '确定要删除这张图片吗？此操作不可恢复。'
+  );
+
+  if (!confirmed) {
     return;
   }
 
@@ -327,4 +333,61 @@ function showToast(message, type = 'info') {
     toast.style.animation = 'slideIn 0.3s ease-out reverse';
     setTimeout(() => toast.remove(), 300);
   }, 3000);
+}
+
+// 显示确认对话框
+function showConfirm(title, message) {
+  return new Promise((resolve) => {
+    const dialog = document.getElementById('confirm-dialog');
+    const titleEl = document.getElementById('confirm-title');
+    const messageEl = document.getElementById('confirm-message');
+    const cancelBtn = document.getElementById('confirm-cancel');
+    const okBtn = document.getElementById('confirm-ok');
+
+    // 设置内容
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+
+    // 显示对话框
+    dialog.style.display = 'flex';
+
+    // 处理按钮点击
+    const handleCancel = () => {
+      dialog.style.display = 'none';
+      cleanup();
+      resolve(false);
+    };
+
+    const handleOk = () => {
+      dialog.style.display = 'none';
+      cleanup();
+      resolve(true);
+    };
+
+    const handleOverlayClick = (e) => {
+      if (e.target.classList.contains('confirm-overlay')) {
+        handleCancel();
+      }
+    };
+
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        handleCancel();
+      }
+    };
+
+    // 绑定事件
+    cancelBtn.addEventListener('click', handleCancel);
+    okBtn.addEventListener('click', handleOk);
+    dialog.addEventListener('click', handleOverlayClick);
+    document.addEventListener('keydown', handleEscape);
+
+    // 清理函数
+    function cleanup() {
+      cancelBtn.removeEventListener('click', handleCancel);
+      okBtn.removeEventListener('click', handleOk);
+      dialog.removeEventListener('click', handleOverlayClick);
+      document.removeEventListener('keydown', handleEscape);
+    }
+  });
 }

@@ -14,6 +14,26 @@
   <!-- Toast 通知容器 -->
   <div id="toast-container"></div>
 
+  <!-- 确认对话框 -->
+  <div id="confirm-dialog" class="confirm-dialog" style="display: none;">
+    <div class="confirm-overlay"></div>
+    <div class="confirm-content">
+      <div class="confirm-header">
+        <svg class="confirm-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <h3 id="confirm-title">确认操作</h3>
+      </div>
+      <p id="confirm-message">确定要执行此操作吗？</p>
+      <div class="confirm-actions">
+        <button id="confirm-cancel" class="confirm-btn cancel-btn">取消</button>
+        <button id="confirm-ok" class="confirm-btn ok-btn">确定</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 主容器 -->
   <div class="random-viewer">
     <!-- 加载状态 -->
