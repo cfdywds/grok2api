@@ -1258,7 +1258,62 @@ class ImageMetadataService:
                             "brightness_score": result["brightness_score"],
                             "quality_issues": result["quality_issues"]
                         }
-                return None
+
+                # 降级到基础 OpenCV 分析
+                import cv2
+                import numpy as np
+
+                img = cv2.imread(str(file_path))
+                if img is None:
+                    logger.error(f"无法读取图片: {file_path}")
+                    return None
+
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+                # 基础分析
+                laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+                if laplacian_var < 50:
+                    blur_score = laplacian_var / 50 * 40
+                elif laplacian_var < 200:
+                    blur_score = 40 + (laplacian_var - 50) / 150 * 40
+                else:
+                    blur_score = 80 + min(20, (laplacian_var - 200) / 100 * 20)
+                blur_score = max(0, min(100, blur_score))
+
+                brightness = np.mean(gray)
+                brightness_score = brightness / 255 * 100
+
+                contrast = gray.std()
+                if contrast < 20:
+                    contrast_score = contrast / 20 * 50
+                elif contrast < 50:
+                    contrast_score = 50 + (contrast - 20) / 30 * 30
+                else:
+                    contrast_score = 80 + min(20, (contrast - 50) / 30 * 20)
+                contrast_score = max(0, min(100, contrast_score))
+
+                quality_issues = []
+                if blur_score < 40:
+                    quality_issues.append("图片模糊")
+                if brightness_score < 15 or brightness_score > 85:
+                    quality_issues.append("亮度异常")
+                if contrast_score < 30:
+                    quality_issues.append("对比度过低")
+
+                quality_score = (
+                    blur_score * 0.5 +
+                    contrast_score * 0.3 +
+                    (100 - abs(brightness_score - 50) * 1.5) * 0.2
+                )
+                quality_score = max(0, min(100, quality_score))
+
+                return {
+                    "quality_score": float(round(quality_score, 2)),
+                    "blur_score": float(round(blur_score, 2)),
+                    "brightness_score": float(round(brightness_score, 2)),
+                    "contrast_score": float(round(contrast_score, 2)),
+                    "quality_issues": quality_issues
+                }
             else:
                 # 完整模式：综合分析
                 analyzer = self._get_analyzer()
