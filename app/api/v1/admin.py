@@ -2228,25 +2228,74 @@ async def admin_img2img(
     n = edit_request.n
     calls_needed = (n + 1) // 2
 
-    async def _call_edit():
-        chat_service = GrokChatService()
-        response = await chat_service.chat(
-            token=token,
-            message=edit_request.prompt,
-            model=model_info.grok_model,
-            mode=None,
-            stream=True,
-            raw_payload=raw_payload,
-        )
-        processor = ImageCollectProcessor(
-            model_info.model_id, token, response_format=response_format
-        )
-        return await processor.process(response)
+    async def _call_edit_with_retry(max_retries=3):
+        """
+        带重试机制的图生图调用
+
+        Args:
+            max_retries: 最大重试次数，默认3次
+
+        Returns:
+            生成的图片列表
+        """
+        last_error = None
+
+        for retry_count in range(max_retries):
+            try:
+                # 如果是重试，获取新的 token
+                if retry_count > 0:
+                    logger.info(f"图生图重试 {retry_count}/{max_retries - 1}，尝试获取新 token...")
+                    try:
+                        nonlocal token_mgr, token
+                        token_mgr, token = await _get_token(edit_request.model)
+                        logger.info(f"已切换到新 token: {token[:10]}...")
+                    except Exception as token_err:
+                        logger.error(f"获取新 token 失败: {token_err}")
+                        # 如果获取 token 失败，使用原 token 继续尝试
+
+                chat_service = GrokChatService()
+                response = await chat_service.chat(
+                    token=token,
+                    message=edit_request.prompt,
+                    model=model_info.grok_model,
+                    mode=None,
+                    stream=True,
+                    raw_payload=raw_payload,
+                )
+                processor = ImageCollectProcessor(
+                    model_info.model_id, token, response_format=response_format
+                )
+                images = await processor.process(response)
+
+                # 检查是否有有效图片
+                valid_images = [img for img in images if img and img != "error"]
+                if valid_images:
+                    logger.info(f"图生图成功，获得 {len(valid_images)} 张有效图片")
+                    return images
+                else:
+                    logger.warning(f"图生图返回空结果，尝试 {retry_count + 1}/{max_retries}")
+                    last_error = Exception("No valid images returned")
+
+            except Exception as e:
+                last_error = e
+                logger.error(f"图生图调用失败 (尝试 {retry_count + 1}/{max_retries}): {e}")
+
+                # 如果不是最后一次重试，等待一段时间后继续
+                if retry_count < max_retries - 1:
+                    wait_time = (retry_count + 1) * 2  # 递增等待时间：2s, 4s, 6s
+                    logger.info(f"等待 {wait_time} 秒后重试...")
+                    await asyncio.sleep(wait_time)
+
+        # 所有重试都失败
+        logger.error(f"图生图在 {max_retries} 次尝试后仍然失败")
+        if last_error:
+            raise last_error
+        return []
 
     if calls_needed == 1:
-        all_images = await _call_edit()
+        all_images = await _call_edit_with_retry()
     else:
-        tasks = [_call_edit() for _ in range(calls_needed)]
+        tasks = [_call_edit_with_retry() for _ in range(calls_needed)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_images = []

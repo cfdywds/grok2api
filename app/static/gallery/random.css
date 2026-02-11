@@ -1,5 +1,11 @@
 /* 随机图片查看器样式 */
 
+/* 确保页面没有滚动条，但不影响其他样式 */
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
 .random-viewer {
   position: fixed;
   top: 56px; /* 导航栏高度 */
@@ -10,13 +16,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-}
-
-/* 确保页面没有滚动条 */
-body {
-  margin: 0;
-  padding: 0;
   overflow: hidden;
 }
 
