@@ -239,6 +239,76 @@ async def list_images(
         raise HTTPException(status_code=500, detail=f"获取图片列表失败: {str(e)}")
 
 
+@router.get("/images/random")
+async def get_random_image(
+    exclude_ids: Optional[str] = Query(None, description="排除的图片ID列表（逗号分隔）"),
+    min_quality_score: Optional[float] = Query(40, description="最低质量分数")
+):
+    """
+    获取随机图片（根据质量分数加权）
+    """
+    try:
+        service = get_image_metadata_service()
+
+        # 获取所有图片
+        data = await service.storage.load_image_metadata()
+        images = data.get("images", [])
+
+        # 解析排除的ID列表
+        excluded_ids = set(exclude_ids.split(",")) if exclude_ids else set()
+
+        # 过滤图片
+        candidates = []
+        weights = []
+
+        for img in images:
+            # 跳过已查看的图片
+            if img.get("id") in excluded_ids:
+                continue
+
+            # 跳过质量分数低于阈值的图片
+            quality_score = img.get("quality_score")
+            if quality_score is None or quality_score < min_quality_score:
+                continue
+
+            # 根据质量分数设置权重
+            if quality_score >= 80:
+                weight = 3
+            elif quality_score >= 60:
+                weight = 2
+            elif quality_score >= 40:
+                weight = 1
+            else:
+                weight = 0.5
+
+            candidates.append(img)
+            weights.append(weight)
+
+        # 如果没有符合条件的图片
+        if not candidates:
+            return {
+                "success": False,
+                "message": "没有符合条件的图片",
+                "data": None
+            }
+
+        # 加权随机选择
+        selected = random.choices(candidates, weights=weights, k=1)[0]
+
+        # 添加文件路径信息
+        selected["file_path"] = str(service.image_dir / selected["filename"])
+        selected["relative_path"] = f"data/tmp/image/{selected['filename']}"
+
+        return {
+            "success": True,
+            "data": selected
+        }
+
+    except Exception as e:
+        logger.error(f"获取随机图片失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取随机图片失败: {str(e)}")
+
+
 @router.get("/images/{image_id}")
 async def get_image(image_id: str):
     """
@@ -467,76 +537,6 @@ async def get_image_quality(image_id: str):
     except Exception as e:
         logger.error(f"获取图片质量失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取图片质量失败: {str(e)}")
-
-
-@router.get("/images/random")
-async def get_random_image(
-    exclude_ids: Optional[str] = Query(None, description="排除的图片ID列表（逗号分隔）"),
-    min_quality_score: Optional[float] = Query(40, description="最低质量分数")
-):
-    """
-    获取随机图片（根据质量分数加权）
-    """
-    try:
-        service = get_image_metadata_service()
-
-        # 获取所有图片
-        data = await service.storage.load_image_metadata()
-        images = data.get("images", [])
-
-        # 解析排除的ID列表
-        excluded_ids = set(exclude_ids.split(",")) if exclude_ids else set()
-
-        # 过滤图片
-        candidates = []
-        weights = []
-
-        for img in images:
-            # 跳过已查看的图片
-            if img.get("id") in excluded_ids:
-                continue
-
-            # 跳过质量分数低于阈值的图片
-            quality_score = img.get("quality_score")
-            if quality_score is None or quality_score < min_quality_score:
-                continue
-
-            # 根据质量分数设置权重
-            if quality_score >= 80:
-                weight = 3
-            elif quality_score >= 60:
-                weight = 2
-            elif quality_score >= 40:
-                weight = 1
-            else:
-                weight = 0.5
-
-            candidates.append(img)
-            weights.append(weight)
-
-        # 如果没有符合条件的图片
-        if not candidates:
-            return {
-                "success": False,
-                "message": "没有符合条件的图片",
-                "data": None
-            }
-
-        # 加权随机选择
-        selected = random.choices(candidates, weights=weights, k=1)[0]
-
-        # 添加文件路径信息
-        selected["file_path"] = str(service.image_dir / selected["filename"])
-        selected["relative_path"] = f"data/tmp/image/{selected['filename']}"
-
-        return {
-            "success": True,
-            "data": selected
-        }
-
-    except Exception as e:
-        logger.error(f"获取随机图片失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取随机图片失败: {str(e)}")
 
 
 @router.post("/images/{image_id}/favorite")
