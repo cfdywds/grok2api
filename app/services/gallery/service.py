@@ -77,12 +77,13 @@ class ImageMetadataService:
                 self._object_detector = None
         return self._object_detector
 
-    async def add_image(self, metadata: ImageMetadata) -> bool:
+    async def add_image(self, metadata: ImageMetadata, auto_analyze: bool = True) -> bool:
         """
         添加图片元数据
 
         Args:
             metadata: 图片元数据
+            auto_analyze: 是否自动分析图片质量（默认True）
 
         Returns:
             是否添加成功
@@ -121,7 +122,29 @@ class ImageMetadataService:
                 # 保存
                 await self.storage.save_image_metadata(data)
                 logger.info(f"添加图片元数据成功: {metadata.id}")
-                return True
+
+            # 自动分析图片质量（在锁外执行，避免阻塞）
+            if auto_analyze:
+                try:
+                    logger.info(f"开始自动分析图片质量: {metadata.id}")
+                    quality_result = await self.analyze_image_quality(metadata.id)
+                    if quality_result:
+                        # 更新质量分数到元数据
+                        await self.update_image(metadata.id, {
+                            "quality_score": quality_result.get("quality_score"),
+                            "blur_score": quality_result.get("blur_score"),
+                            "brightness_score": quality_result.get("brightness_score"),
+                            "contrast_score": quality_result.get("contrast_score"),
+                            "quality_issues": quality_result.get("quality_issues", []),
+                        })
+                        logger.info(f"自动分析完成，质量分数: {quality_result.get('quality_score')}")
+                    else:
+                        logger.warning(f"自动分析失败: {metadata.id}")
+                except Exception as e:
+                    logger.error(f"自动分析图片质量失败: {e}")
+                    # 不影响添加图片的成功状态
+
+            return True
 
         except Exception as e:
             logger.error(f"添加图片元数据失败: {e}")

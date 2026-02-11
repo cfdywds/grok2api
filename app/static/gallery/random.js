@@ -390,9 +390,12 @@ function showConfirm(title, message) {
       }
     };
 
-    const handleEscape = (e) => {
+    const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         handleCancel();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        handleOk();
       }
     };
 
@@ -400,14 +403,14 @@ function showConfirm(title, message) {
     cancelBtn.addEventListener('click', handleCancel);
     okBtn.addEventListener('click', handleOk);
     dialog.addEventListener('click', handleOverlayClick);
-    document.addEventListener('keydown', handleEscape);
+    document.addEventListener('keydown', handleKeyDown);
 
     // 清理函数
     function cleanup() {
       cancelBtn.removeEventListener('click', handleCancel);
       okBtn.removeEventListener('click', handleOk);
       dialog.removeEventListener('click', handleOverlayClick);
-      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handleKeyDown);
     }
   });
 }
