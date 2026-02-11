@@ -129,6 +129,11 @@ def create_app() -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+    # 图片文件服务
+    image_dir = Path(__file__).parent / "data" / "tmp" / "image"
+    if image_dir.exists():
+        app.mount("/data/tmp/image", StaticFiles(directory=image_dir), name="images")
+
     # 注册管理路由
     from app.api.v1.admin import router as admin_router
 
