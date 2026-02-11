@@ -15,10 +15,9 @@ const elements = {
   mainImage: null,
   favoriteBtn: null,
   infoPanel: null,
-  infoHeader: null,
-  infoContent: null,
-  swipeLeft: null,
-  swipeRight: null,
+  infoToggleBtn: null,
+  prevBtn: null,
+  nextBtn: null,
   deleteBtn: null,
   downloadBtn: null,
   resetBtn: null,
@@ -33,10 +32,9 @@ document.addEventListener('DOMContentLoaded', () => {
   elements.mainImage = document.getElementById('main-image');
   elements.favoriteBtn = document.getElementById('favorite-btn');
   elements.infoPanel = document.getElementById('info-panel');
-  elements.infoHeader = document.getElementById('info-header');
-  elements.infoContent = document.getElementById('info-content');
-  elements.swipeLeft = document.getElementById('swipe-left');
-  elements.swipeRight = document.getElementById('swipe-right');
+  elements.infoToggleBtn = document.getElementById('info-toggle-btn');
+  elements.prevBtn = document.getElementById('prev-btn');
+  elements.nextBtn = document.getElementById('next-btn');
   elements.deleteBtn = document.getElementById('delete-btn');
   elements.downloadBtn = document.getElementById('download-btn');
   elements.resetBtn = document.getElementById('reset-btn');
@@ -53,17 +51,20 @@ function bindEvents() {
   // 收藏按钮
   elements.favoriteBtn.addEventListener('click', handleFavoriteClick);
 
-  // 滑动区域
-  elements.swipeLeft.addEventListener('click', () => loadRandomImage());
-  elements.swipeRight.addEventListener('click', () => loadRandomImage());
+  // 导航按钮
+  elements.prevBtn.addEventListener('click', () => loadRandomImage());
+  elements.nextBtn.addEventListener('click', () => loadRandomImage());
 
-  // 信息面板折叠
-  elements.infoHeader.addEventListener('click', toggleInfoPanel);
+  // 信息面板切换
+  elements.infoToggleBtn.addEventListener('click', toggleInfoPanel);
 
   // 操作按钮
   elements.deleteBtn.addEventListener('click', handleDeleteClick);
   elements.downloadBtn.addEventListener('click', handleDownloadClick);
   elements.resetBtn.addEventListener('click', handleResetClick);
+
+  // 点击图片切换到下一张
+  elements.mainImage.addEventListener('click', () => loadRandomImage());
 
   // 键盘事件
   document.addEventListener('keydown', handleKeyDown);
@@ -94,9 +95,16 @@ function bindEvents() {
 function handleKeyDown(e) {
   if (!state.currentImage) return;
 
+  // 如果确认对话框打开，不处理键盘事件
+  const confirmDialog = document.getElementById('confirm-dialog');
+  if (confirmDialog && confirmDialog.style.display !== 'none') {
+    return;
+  }
+
   switch (e.key) {
     case 'ArrowLeft':
     case 'ArrowRight':
+    case ' ': // 空格键
       e.preventDefault();
       loadRandomImage();
       break;
@@ -105,6 +113,18 @@ function handleKeyDown(e) {
       e.preventDefault();
       handleFavoriteClick();
       break;
+    case 'j':
+    case 'J':
+      e.preventDefault();
+      handleDownloadClick();
+      break;
+    case 'i':
+    case 'I':
+      e.preventDefault();
+      toggleInfoPanel();
+      break;
+    case 'd':
+    case 'D':
     case 'Delete':
       e.preventDefault();
       handleDeleteClick();
