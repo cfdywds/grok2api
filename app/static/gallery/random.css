@@ -13,6 +13,13 @@
   overflow: hidden;
 }
 
+/* 确保页面没有滚动条 */
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 /* 加载状态 */
 .loading-state {
   display: flex;

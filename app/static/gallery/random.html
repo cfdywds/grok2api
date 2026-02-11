@@ -9,7 +9,7 @@
 </head>
 <body>
   <!-- 导航栏 -->
-  <div id="header-container"></div>
+  <div id="app-header"></div>
 
   <!-- Toast 通知容器 -->
   <div id="toast-container"></div>
@@ -102,23 +102,7 @@
     </div>
   </div>
 
+  <script src="/static/common/header.js"></script>
   <script src="/static/gallery/random.js"></script>
-  <script>
-    // 加载导航栏
-    fetch('/static/common/header.html')
-      .then(response => response.text())
-      .then(html => {
-        document.getElementById('header-container').innerHTML = html;
-        // 设置当前页面高亮
-        const currentLink = document.querySelector('[data-nav="/admin/gallery/random"]');
-        if (currentLink) {
-          currentLink.classList.add('active');
-        }
-        // 初始化导航栏脚本
-        if (typeof initHeader === 'function') {
-          initHeader();
-        }
-      });
-  </script>
 </body>
 </html>
