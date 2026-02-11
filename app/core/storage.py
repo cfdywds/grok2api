@@ -42,6 +42,7 @@ DATA_DIR = Path(os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR))).expanduser()
 CONFIG_FILE = DATA_DIR / "config.toml"
 TOKEN_FILE = DATA_DIR / "token.json"
 IMAGE_METADATA_FILE = DATA_DIR / "image_metadata.json"
+PROMPTS_FILE = DATA_DIR / "prompts.json"
 LOCK_DIR = DATA_DIR / ".locks"
 
 
@@ -138,6 +139,16 @@ class BaseStorage(abc.ABC):
     @abc.abstractmethod
     async def save_image_metadata(self, data: Dict[str, Any]):
         """保存图片元数据"""
+        pass
+
+    @abc.abstractmethod
+    async def load_prompts(self) -> Dict[str, Any]:
+        """加载提示词"""
+        pass
+
+    @abc.abstractmethod
+    async def save_prompts(self, data: Dict[str, Any]):
+        """保存提示词"""
         pass
 
     @abc.abstractmethod
@@ -302,6 +313,26 @@ class LocalStorage(BaseStorage):
             logger.error(f"LocalStorage: 保存图片元数据失败: {e}")
             raise StorageError(f"保存图片元数据失败: {e}")
 
+    async def load_prompts(self) -> Dict[str, Any]:
+        if not PROMPTS_FILE.exists():
+            return {"prompts": [], "version": "1.0"}
+        try:
+            async with aiofiles.open(PROMPTS_FILE, "rb") as f:
+                content = await f.read()
+                return json_loads(content)
+        except Exception as e:
+            logger.error(f"LocalStorage: 加载提示词失败: {e}")
+            return {"prompts": [], "version": "1.0"}
+
+    async def save_prompts(self, data: Dict[str, Any]):
+        try:
+            PROMPTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            content = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+            await safe_atomic_write(PROMPTS_FILE, content)
+        except Exception as e:
+            logger.error(f"LocalStorage: 保存提示词失败: {e}")
+            raise StorageError(f"保存提示词失败: {e}")
+
     async def close(self):
         pass
 
@@ -330,6 +361,7 @@ class RedisStorage(BaseStorage):
         self.prefix_pool_set = "grok2api:pool:"  # Set: pool -> token_ids
         self.prefix_token_hash = "grok2api:token:"  # Hash: token_id -> token_data
         self.image_metadata_key = "grok2api:image_metadata"  # String: JSON data
+        self.prompts_key = "grok2api:prompts"  # String: JSON data
         self.lock_prefix = "grok2api:lock:"
 
     @asynccontextmanager
@@ -576,6 +608,25 @@ class RedisStorage(BaseStorage):
             logger.error(f"RedisStorage: 保存图片元数据失败: {e}")
             raise
 
+    async def load_prompts(self) -> Dict[str, Any]:
+        """从 Redis 加载提示词"""
+        try:
+            data = await self.redis.get(self.prompts_key)
+            if not data:
+                return {"prompts": [], "version": "1.0"}
+            return json_loads(data)
+        except Exception as e:
+            logger.error(f"RedisStorage: 加载提示词失败: {e}")
+            return {"prompts": [], "version": "1.0"}
+
+    async def save_prompts(self, data: Dict[str, Any]):
+        """保存提示词到 Redis"""
+        try:
+            await self.redis.set(self.prompts_key, json_dumps(data))
+        except Exception as e:
+            logger.error(f"RedisStorage: 保存提示词失败: {e}")
+            raise
+
     async def close(self):
         try:
             await self.redis.close()
@@ -658,6 +709,18 @@ class SQLStorage(BaseStorage):
                 """)
                 )
 
+                # 提示词表
+                await conn.execute(
+                    text("""
+                    CREATE TABLE IF NOT EXISTS prompts (
+                        id VARCHAR(64) PRIMARY KEY,
+                        data TEXT,
+                        created_at BIGINT,
+                        updated_at BIGINT
+                    )
+                """)
+                )
+
                 # 索引
                 try:
                     await conn.execute(
@@ -665,6 +728,9 @@ class SQLStorage(BaseStorage):
                     )
                     await conn.execute(
                         text("CREATE INDEX idx_image_metadata_created ON image_metadata (created_at)")
+                    )
+                    await conn.execute(
+                        text("CREATE INDEX idx_prompts_created ON prompts (created_at)")
                     )
                 except Exception:
                     pass
@@ -908,6 +974,51 @@ class SQLStorage(BaseStorage):
                 await session.commit()
         except Exception as e:
             logger.error(f"SQLStorage: 保存图片元数据失败: {e}")
+            raise
+
+    async def load_prompts(self) -> Dict[str, Any]:
+        await self._ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            async with self.async_session() as session:
+                res = await session.execute(
+                    text("SELECT data FROM prompts WHERE id = 'prompts'")
+                )
+                row = res.fetchone()
+                if not row:
+                    return {"prompts": [], "version": "1.0"}
+
+                try:
+                    return json_loads(row[0])
+                except Exception:
+                    return {"prompts": [], "version": "1.0"}
+        except Exception as e:
+            logger.error(f"SQLStorage: 加载提示词失败: {e}")
+            return {"prompts": [], "version": "1.0"}
+
+    async def save_prompts(self, data: Dict[str, Any]):
+        await self._ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            async with self.async_session() as session:
+                data_json = json_dumps(data)
+                now = int(time.time() * 1000)
+
+                # Upsert 逻辑
+                await session.execute(
+                    text("DELETE FROM prompts WHERE id = 'prompts'")
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO prompts (id, data, created_at, updated_at) VALUES (:id, :data, :created_at, :updated_at)"
+                    ),
+                    {"id": "prompts", "data": data_json, "created_at": now, "updated_at": now},
+                )
+                await session.commit()
+        except Exception as e:
+            logger.error(f"SQLStorage: 保存提示词失败: {e}")
             raise
 
     async def close(self):

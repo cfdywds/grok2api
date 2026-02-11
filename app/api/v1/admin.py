@@ -168,6 +168,12 @@ async def gallery_random_page():
     return await render_template("gallery/random.html")
 
 
+@router.get("/admin/prompts", response_class=HTMLResponse, include_in_schema=False)
+async def prompts_page():
+    """提示词管理页面"""
+    return await render_template("prompts/prompts.html")
+
+
 def _sse_event(payload: dict) -> str:
     return f"data: {orjson.dumps(payload).decode()}\n\n"
 

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>提示词管理 - Grok2API</title>
+  <link rel="stylesheet" href="/static/common/common.css">
+  <link rel="stylesheet" href="/static/prompts/prompts.css">
+</head>
+<body>
+  <!-- 导航栏 -->
+  <div id="header-container"></div>
+
+  <!-- Toast 通知容器 -->
+  <div id="toast-container"></div>
+
+  <!-- 主容器 -->
+  <div class="prompts-container">
+    <!-- 顶部操作栏 -->
+    <div class="top-bar">
+      <div class="left-section">
+        <h1 class="page-title">提示词管理</h1>
+        <div class="stats">
+          <span id="total-count">总计: 0</span>
+        </div>
+      </div>
+      <div class="right-section">
+        <button id="add-btn" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          添加提示词
+        </button>
+        <button id="import-btn" class="btn btn-secondary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          导入
+        </button>
+        <button id="export-btn" class="btn btn-secondary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          导出
+        </button>
+      </div>
+    </div>
+
+    <!-- 筛选栏 -->
+    <div class="filter-bar">
+      <div class="filter-group">
+        <input type="text" id="search-input" class="search-input" placeholder="搜索提示词...">
+      </div>
+      <div class="filter-group">
+        <select id="category-filter" class="filter-select">
+          <option value="">全部分类</option>
+        </select>
+        <select id="tag-filter" class="filter-select">
+          <option value="">全部标签</option>
+        </select>
+        <label class="checkbox-label">
+          <input type="checkbox" id="favorite-filter">
+          <span>仅显示收藏</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 提示词列表 -->
+    <div id="prompts-list" class="prompts-list">
+      <!-- 动态加载 -->
+    </div>
+
+    <!-- 空状态 -->
+    <div id="empty-state" class="empty-state" style="display: none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+        <line x1="16" y1="13" x2="8" y2="13"></line>
+        <line x1="16" y1="17" x2="8" y2="17"></line>
+        <polyline points="10 9 9 9 8 9"></polyline>
+      </svg>
+      <p>还没有提示词</p>
+      <button id="add-first-btn" class="btn btn-primary">添加第一个提示词</button>
+    </div>
+  </div>
+
+  <!-- 添加/编辑对话框 -->
+  <div id="prompt-dialog" class="dialog" style="display: none;">
+    <div class="dialog-overlay"></div>
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <h3 id="dialog-title">添加提示词</h3>
+        <button id="dialog-close" class="close-btn">×</button>
+      </div>
+      <div class="dialog-body">
+        <div class="form-group">
+          <label>标题 *</label>
+          <input type="text" id="prompt-title" class="form-input" placeholder="输入提示词标题" maxlength="100">
+        </div>
+        <div class="form-group">
+          <label>内容 *</label>
+          <textarea id="prompt-content" class="form-textarea" placeholder="输入提示词内容" rows="8"></textarea>
+        </div>
+        <div class="form-group">
+          <label>分类</label>
+          <input type="text" id="prompt-category" class="form-input" placeholder="输入分类名称" list="category-list">
+          <datalist id="category-list"></datalist>
+        </div>
+        <div class="form-group">
+          <label>标签（用逗号分隔）</label>
+          <input type="text" id="prompt-tags" class="form-input" placeholder="例如: 写作, 创意, 营销">
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button id="dialog-cancel" class="btn btn-secondary">取消</button>
+        <button id="dialog-save" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入对话框 -->
+  <div id="import-dialog" class="dialog" style="display: none;">
+    <div class="dialog-overlay"></div>
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <h3>导入提示词</h3>
+        <button id="import-dialog-close" class="close-btn">×</button>
+      </div>
+      <div class="dialog-body">
+        <div class="form-group">
+          <label>选择 JSON 文件</label>
+          <input type="file" id="import-file" accept=".json" class="form-input">
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="import-merge" checked>
+            <span>合并模式（保留现有数据）</span>
+          </label>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button id="import-dialog-cancel" class="btn btn-secondary">取消</button>
+        <button id="import-dialog-confirm" class="btn btn-primary">导入</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/prompts/prompts.js"></script>
+  <script>
+    // 加载导航栏
+    fetch('/static/common/header.html')
+      .then(response => response.text())
+      .then(html => {
+        document.getElementById('header-container').innerHTML = html;
+        const currentLink = document.querySelector('[data-nav="/admin/prompts"]');
+        if (currentLink) {
+          currentLink.classList.add('active');
+        }
+      });
+  </script>
+</body>
+</html>
