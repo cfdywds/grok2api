@@ -505,6 +505,43 @@ class ImageMetadataService:
             logger.error(f"更新图片标签失败: {e}")
             return False
 
+    async def toggle_favorite(self, image_id: str, favorite: bool) -> bool:
+        """
+        切换图片收藏状态
+
+        Args:
+            image_id: 图片ID
+            favorite: 收藏状态
+
+        Returns:
+            是否更新成功
+        """
+        try:
+            async with self.storage.acquire_lock("image_metadata", timeout=10):
+                data = await self.storage.load_image_metadata()
+                images = data.get("images", [])
+
+                # 查找并更新
+                found = False
+                for img in images:
+                    if img.get("id") == image_id:
+                        img["favorite"] = favorite
+                        found = True
+                        break
+
+                if not found:
+                    logger.warning(f"图片不存在: {image_id}")
+                    return False
+
+                # 保存
+                await self.storage.save_image_metadata(data)
+                logger.info(f"更新图片收藏状态成功: {image_id}, favorite={favorite}")
+                return True
+
+        except Exception as e:
+            logger.error(f"更新图片收藏状态失败: {e}")
+            return False
+
     async def get_all_tags(self) -> List[Dict[str, Any]]:
         """
         获取所有标签及其使用次数

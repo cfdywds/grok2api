@@ -162,6 +162,12 @@ async def gallery_page():
     return await render_template("gallery/gallery.html")
 
 
+@router.get("/admin/gallery/random")
+async def gallery_random_page():
+    """随机图片查看页面"""
+    return await render_template("gallery/random.html")
+
+
 def _sse_event(payload: dict) -> str:
     return f"data: {orjson.dumps(payload).decode()}\n\n"
 

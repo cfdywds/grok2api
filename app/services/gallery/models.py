@@ -24,6 +24,7 @@ class ImageMetadata(BaseModel):
     blur_score: Optional[float] = Field(None, description="模糊度分数（越高越清晰）")
     brightness_score: Optional[float] = Field(None, description="亮度分数（0-100，50为正常）")
     quality_issues: List[str] = Field(default_factory=list, description="质量问题列表")
+    favorite: bool = Field(default=False, description="是否收藏")
 
 
 class ImageFilter(BaseModel):

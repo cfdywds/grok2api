@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>随机图片查看 - Grok2API</title>
+  <link rel="stylesheet" href="/static/common/common.css">
+  <link rel="stylesheet" href="/static/gallery/random.css">
+</head>
+<body>
+  <!-- 导航栏 -->
+  <div id="header-container"></div>
+
+  <!-- Toast 通知容器 -->
+  <div id="toast-container"></div>
+
+  <!-- 主容器 -->
+  <div class="random-viewer">
+    <!-- 加载状态 -->
+    <div id="loading-state" class="loading-state">
+      <div class="spinner"></div>
+      <p>加载中...</p>
+    </div>
+
+    <!-- 图片容器 -->
+    <div id="image-container" class="image-container" style="display: none;">
+      <!-- 收藏按钮 -->
+      <button id="favorite-btn" class="favorite-btn" title="收藏">
+        <svg class="heart-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+        </svg>
+      </button>
+
+      <!-- 主图片 -->
+      <img id="main-image" class="main-image" alt="随机图片">
+
+      <!-- 左滑动区域 -->
+      <div class="swipe-area swipe-left" id="swipe-left">
+        <div class="swipe-hint">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+          <span>上一张</span>
+        </div>
+      </div>
+
+      <!-- 右滑动区域 -->
+      <div class="swipe-area swipe-right" id="swipe-right">
+        <div class="swipe-hint">
+          <span>下一张</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 信息面板 -->
+      <div class="info-panel" id="info-panel">
+        <div class="info-header" id="info-header">
+          <span>图片信息</span>
+          <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="18 15 12 9 6 15"></polyline>
+          </svg>
+        </div>
+        <div class="info-content" id="info-content">
+          <div class="info-item">
+            <label>提示词</label>
+            <p id="info-prompt">-</p>
+          </div>
+          <div class="info-item">
+            <label>质量评分</label>
+            <div class="quality-bar">
+              <div class="quality-fill" id="quality-fill"></div>
+              <span class="quality-text" id="quality-text">-</span>
+            </div>
+          </div>
+          <div class="info-item">
+            <label>尺寸</label>
+            <p id="info-size">-</p>
+          </div>
+          <div class="info-item">
+            <label>创建时间</label>
+            <p id="info-time">-</p>
+          </div>
+          <div class="info-actions">
+            <button id="delete-btn" class="action-btn delete-btn">删除</button>
+            <button id="download-btn" class="action-btn download-btn">下载</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 空状态 -->
+    <div id="empty-state" class="empty-state" style="display: none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+        <polyline points="21 15 16 10 5 21"></polyline>
+      </svg>
+      <p>没有符合条件的图片</p>
+      <button id="reset-btn" class="reset-btn">重新开始</button>
+    </div>
+  </div>
+
+  <script src="/static/gallery/random.js"></script>
+  <script>
+    // 加载导航栏
+    fetch('/static/common/header.html')
+      .then(response => response.text())
+      .then(html => {
+        document.getElementById('header-container').innerHTML = html;
+        // 设置当前页面高亮
+        const currentLink = document.querySelector('[data-nav="/admin/gallery/random"]');
+        if (currentLink) {
+          currentLink.classList.add('active');
+        }
+        // 初始化导航栏脚本
+        if (typeof initHeader === 'function') {
+          initHeader();
+        }
+      });
+  </script>
+</body>
+</html>
