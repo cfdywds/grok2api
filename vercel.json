@@ -2,8 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "framework": "fastapi",
-  "buildCommand": "pip install -r requirements.txt",
-  "installCommand": "pip install --upgrade pip",
+  "buildCommand": "pip install --break-system-packages -r requirements.txt || uv pip install -r requirements.txt",
+  "installCommand": "pip install --break-system-packages --upgrade pip || echo 'Using uv'",
   "git": {
     "deploymentEnabled": {
       "navy": true,
