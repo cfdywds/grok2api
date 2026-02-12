@@ -739,7 +739,8 @@ function showLoading() {
 
 function hideLoading() {
     document.getElementById('loading').style.display = 'none';
-    document.getElementById('images-container').style.display = state.viewMode === 'grid' ? 'grid' : 'flex';
+    const container = document.getElementById('images-container');
+    container.style.display = 'block';
 }
 
 function showEmpty() {
