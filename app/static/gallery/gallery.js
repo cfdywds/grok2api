@@ -5,8 +5,15 @@ function loadUserPreferences() {
     const savedPageSize = localStorage.getItem('gallery_page_size');
     const savedViewMode = localStorage.getItem('gallery_view_mode');
 
+    // 验证 pageSize 是否在有效范围内（最大 200）
+    let pageSize = savedPageSize ? parseInt(savedPageSize) : 100;
+    if (pageSize > 200) {
+        pageSize = 200;
+        localStorage.setItem('gallery_page_size', '200');
+    }
+
     return {
-        pageSize: savedPageSize ? parseInt(savedPageSize) : 100,
+        pageSize: pageSize,
         viewMode: savedViewMode || 'grid'
     };
 }
