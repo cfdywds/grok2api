@@ -45,13 +45,16 @@
 </nav>
 
 <!-- 加载二维码弹窗 -->
+<div id="qrcode-modal-container"></div>
+
 <script>
   // 动态加载二维码弹窗组件
   fetch('/static/common/qrcode-modal.html')
     .then(response => response.text())
     .then(html => {
-      const div = document.createElement('div');
-      div.innerHTML = html;
-      document.body.appendChild(div);
+      document.getElementById('qrcode-modal-container').innerHTML = html;
+    })
+    .catch(error => {
+      console.error('加载二维码弹窗失败:', error);
     });
 </script>
