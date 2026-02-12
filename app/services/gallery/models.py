@@ -60,6 +60,9 @@ class ImageFilter(BaseModel):
     only_analyzed: Optional[bool] = Field(None, description="仅显示已分析的图片")
     only_unanalyzed: Optional[bool] = Field(None, description="仅显示未分析的图片")
 
+    # 收藏筛选
+    favorite: Optional[bool] = Field(None, description="是否筛选收藏的图片")
+
 
 class ImageListResponse(BaseModel):
     """图片列表响应"""

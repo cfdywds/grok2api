@@ -31,6 +31,7 @@ const state = {
         minQualityScore: null,
         maxQualityScore: null,
         hasQualityIssues: null,
+        favorite: null,
     },
     currentImageId: null,
     currentImageIndex: -1, // 当前图片在列表中的索引
@@ -219,6 +220,7 @@ async function fetchImages() {
         if (state.filters.minQualityScore !== null) params.append('min_quality_score', state.filters.minQualityScore);
         if (state.filters.maxQualityScore !== null) params.append('max_quality_score', state.filters.maxQualityScore);
         if (state.filters.hasQualityIssues !== null) params.append('has_quality_issues', state.filters.hasQualityIssues);
+        if (state.filters.favorite !== null) params.append('favorite', state.filters.favorite);
 
         const response = await fetch(`${API_BASE}/images?${params}`);
         const data = await response.json();
@@ -583,9 +585,14 @@ function createImageCard(image) {
         qualityBadge = `<div class="quality-badge ${qualityClass}">${score.toFixed(0)}</div>`;
     }
 
+    // 收藏按钮
+    const favoriteClass = image.favorite ? 'favorited' : '';
+    const favoriteIcon = image.favorite ? '❤️' : '🤍';
+
     card.innerHTML = `
         <input type="checkbox" class="image-card-checkbox" ${isSelected ? 'checked' : ''}>
         ${qualityBadge}
+        <button class="favorite-btn ${favoriteClass}" data-id="${image.id}" title="${image.favorite ? '取消收藏' : '收藏'}">${favoriteIcon}</button>
         <img src="/v1/files/image/${image.filename}" alt="${image.prompt}" class="image-card-img">
         <div class="image-card-info">
             <div class="image-card-prompt">${escapeHtml(image.prompt)}</div>
@@ -608,9 +615,16 @@ function createImageCard(image) {
         toggleSelection(image.id);
     });
 
+    // 收藏按钮事件
+    const favoriteBtn = card.querySelector('.favorite-btn');
+    favoriteBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await toggleFavorite(image.id, !image.favorite);
+    });
+
     // 点击卡片显示详情
     card.addEventListener('click', (e) => {
-        if (e.target !== checkbox) {
+        if (e.target !== checkbox && !e.target.classList.contains('favorite-btn')) {
             showImageDetail(image.id);
         }
     });
@@ -704,7 +718,7 @@ function updatePagination() {
     const startIndex = (state.currentPage - 1) * state.pageSize + 1;
     const endIndex = Math.min(state.currentPage * state.pageSize, state.total);
 
-    const pageText = `显示 ${startIndex}-${endIndex} / 共 ${state.total} 张 (第 ${state.currentPage}/${state.totalPages} 页)`;
+    const pageText = `第 ${state.currentPage} / ${state.totalPages} 页 (${startIndex}-${endIndex} / 共 ${state.total} 张)`;
     pageInfo.textContent = pageText;
     pageInfoTop.textContent = pageText;
 
@@ -758,6 +772,18 @@ async function showImageDetail(imageId) {
     // 显示文件路径
     const filePathInput = document.getElementById('detail-file-path');
     filePathInput.value = image.file_path || image.relative_path || '未知';
+
+    // 更新收藏按钮状态
+    const favoriteBtn = document.getElementById('favorite-detail-btn');
+    if (image.favorite) {
+        favoriteBtn.textContent = '💔 取消收藏';
+        favoriteBtn.classList.add('btn-danger');
+        favoriteBtn.classList.remove('btn-secondary');
+    } else {
+        favoriteBtn.textContent = '❤️ 收藏';
+        favoriteBtn.classList.add('btn-secondary');
+        favoriteBtn.classList.remove('btn-danger');
+    }
 
     // 显示质量信息
     const qualityInfo = document.getElementById('quality-info');
@@ -902,6 +928,16 @@ function initEventListeners() {
             state.filters.hasQualityIssues = null;
         }
 
+        // 收藏筛选
+        const favoriteValue = document.getElementById('favorite-filter').value;
+        if (favoriteValue === 'true') {
+            state.filters.favorite = true;
+        } else if (favoriteValue === 'false') {
+            state.filters.favorite = false;
+        } else {
+            state.filters.favorite = null;
+        }
+
         state.currentPage = 1;
         fetchImages();
     });
@@ -924,6 +960,7 @@ function initEventListeners() {
         document.getElementById('ratio-filter').value = '';
         document.getElementById('sort-filter').value = 'created_at:desc';
         document.getElementById('quality-filter').value = '';
+        document.getElementById('favorite-filter').value = '';
         document.getElementById('page-size-filter').value = '50';
 
         state.filters = {
@@ -935,6 +972,7 @@ function initEventListeners() {
             minQualityScore: null,
             maxQualityScore: null,
             hasQualityIssues: null,
+            favorite: null,
         };
 
         state.pageSize = 50;
@@ -1049,6 +1087,9 @@ function initEventListeners() {
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
     });
+
+    // 滑动翻页功能
+    initSwipeNavigation();
 
     // 弹窗关闭
     document.getElementById('close-detail-modal').addEventListener('click', closeImageDetail);
@@ -1227,6 +1268,16 @@ function initEventListeners() {
         Toast.success('路径已复制到剪贴板');
     });
 
+    // 收藏按钮（详情页）
+    document.getElementById('favorite-detail-btn').addEventListener('click', async () => {
+        if (!state.currentImageId) return;
+        const image = await fetchImageDetail(state.currentImageId);
+        if (!image) return;
+        await toggleFavorite(state.currentImageId, !image.favorite);
+        // 重新加载详情以更新按钮状态
+        await showImageDetail(state.currentImageId);
+    });
+
     // 同步本地按钮
     document.getElementById('scan-btn').addEventListener('click', async () => {
         await scanLocalImages();
@@ -1378,6 +1429,139 @@ function initEventListeners() {
         if (files.length > 0) {
             uploadImages(files);
         }
+    });
+}
+
+// 收藏功能
+async function toggleFavorite(imageId, favorite) {
+    try {
+        const response = await fetch(`${API_BASE}/images/${imageId}/favorite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ favorite }),
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            Toast.success(favorite ? '已添加到收藏' : '已取消收藏');
+            // 更新本地状态
+            const image = state.images.find(img => img.id === imageId);
+            if (image) {
+                image.favorite = favorite;
+            }
+            // 重新渲染图片列表
+            renderImages();
+        } else {
+            Toast.error('操作失败，请重试');
+        }
+    } catch (error) {
+        console.error('收藏操作失败:', error);
+        Toast.error('操作失败，请重试');
+    }
+}
+
+// 滑动翻页功能
+function initSwipeNavigation() {
+    const wrapper = document.getElementById('images-container-wrapper');
+    let startX = 0;
+    let startY = 0;
+    let isDragging = false;
+
+    wrapper.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        isDragging = true;
+    }, { passive: true });
+
+    wrapper.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+
+        const currentX = e.touches[0].clientX;
+        const currentY = e.touches[0].clientY;
+        const diffX = startX - currentX;
+        const diffY = startY - currentY;
+
+        // 只有水平滑动距离大于垂直滑动距离时才触发翻页
+        if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+            e.preventDefault();
+        }
+    }, { passive: false });
+
+    wrapper.addEventListener('touchend', (e) => {
+        if (!isDragging) return;
+
+        const endX = e.changedTouches[0].clientX;
+        const endY = e.changedTouches[0].clientY;
+        const diffX = startX - endX;
+        const diffY = startY - endY;
+
+        // 只有水平滑动距离大于垂直滑动距离且超过阈值时才翻页
+        if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 100) {
+            if (diffX > 0 && state.currentPage < state.totalPages) {
+                // 向左滑动，下一页
+                state.currentPage++;
+                fetchImages();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } else if (diffX < 0 && state.currentPage > 1) {
+                // 向右滑动，上一页
+                state.currentPage--;
+                fetchImages();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }
+
+        isDragging = false;
+    }, { passive: true });
+
+    // 鼠标拖拽支持（桌面端）
+    let mouseStartX = 0;
+    let mouseStartY = 0;
+    let isMouseDragging = false;
+
+    wrapper.addEventListener('mousedown', (e) => {
+        mouseStartX = e.clientX;
+        mouseStartY = e.clientY;
+        isMouseDragging = true;
+    });
+
+    wrapper.addEventListener('mousemove', (e) => {
+        if (!isMouseDragging) return;
+
+        const currentX = e.clientX;
+        const diffX = mouseStartX - currentX;
+
+        if (Math.abs(diffX) > 10) {
+            wrapper.style.cursor = 'grabbing';
+        }
+    });
+
+    wrapper.addEventListener('mouseup', (e) => {
+        if (!isMouseDragging) return;
+
+        const endX = e.clientX;
+        const diffX = mouseStartX - endX;
+
+        if (Math.abs(diffX) > 150) {
+            if (diffX > 0 && state.currentPage < state.totalPages) {
+                // 向左拖动，下一页
+                state.currentPage++;
+                fetchImages();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } else if (diffX < 0 && state.currentPage > 1) {
+                // 向右拖动，上一页
+                state.currentPage--;
+                fetchImages();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }
+
+        isMouseDragging = false;
+        wrapper.style.cursor = 'default';
+    });
+
+    wrapper.addEventListener('mouseleave', () => {
+        isMouseDragging = false;
+        wrapper.style.cursor = 'default';
     });
 }
 

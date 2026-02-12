@@ -435,6 +435,15 @@ class ImageMetadataService:
             ]
             logger.info(f"only_unanalyzed=True 筛选: {before_count} -> {len(filtered)}")
 
+        # 收藏筛选
+        if filters.favorite is not None:
+            before_count = len(filtered)
+            filtered = [
+                img for img in filtered
+                if img.get("favorite", False) == filters.favorite
+            ]
+            logger.info(f"favorite={filters.favorite} 筛选: {before_count} -> {len(filtered)}")
+
         return filtered
 
     async def delete_images(self, image_ids: List[str]) -> Dict[str, Any]:

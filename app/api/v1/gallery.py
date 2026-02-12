@@ -183,6 +183,9 @@ async def list_images(
     only_analyzed: Optional[bool] = Query(None, description="仅显示已分析的图片"),
     only_unanalyzed: Optional[bool] = Query(None, description="仅显示未分析的图片"),
 
+    # 收藏筛选
+    favorite: Optional[bool] = Query(None, description="是否筛选收藏的图片"),
+
     sort_by: str = Query("created_at", description="排序字段"),
     sort_order: str = Query("desc", description="排序顺序（asc/desc）"),
 ):
@@ -215,6 +218,7 @@ async def list_images(
             has_quality_issues=has_quality_issues,
             only_analyzed=only_analyzed,
             only_unanalyzed=only_unanalyzed,
+            favorite=favorite,
         )
 
         # 调试日志

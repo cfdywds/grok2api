@@ -85,6 +85,11 @@
                         <option value="low">较差 (<60分)</option>
                         <option value="issues">有质量问题</option>
                     </select>
+                    <select id="favorite-filter" class="filter-select">
+                        <option value="">所有图片</option>
+                        <option value="true">仅收藏</option>
+                        <option value="false">未收藏</option>
+                    </select>
                     <select id="page-size-filter" class="filter-select" title="每页显示数量">
                         <option value="20">20/页</option>
                         <option value="50" selected>50/页</option>
@@ -137,14 +142,16 @@
 
             <!-- 顶部分页 -->
             <div class="pagination pagination-top" id="pagination-top" style="display: none;">
-                <button id="prev-page-top" class="btn btn-secondary" disabled>上一页</button>
+                <button id="prev-page-top" class="btn btn-secondary" disabled>← 上一页</button>
                 <span id="page-info-top">第 1 页 / 共 1 页</span>
-                <button id="next-page-top" class="btn btn-secondary" disabled>下一页</button>
+                <button id="next-page-top" class="btn btn-secondary" disabled>下一页 →</button>
             </div>
 
             <!-- 图片容器 -->
-            <div id="images-container" class="images-grid">
-                <!-- 图片将通过 JavaScript 动态加载 -->
+            <div class="images-container-wrapper" id="images-container-wrapper">
+                <div id="images-container" class="images-grid">
+                    <!-- 图片将通过 JavaScript 动态加载 -->
+                </div>
             </div>
 
             <!-- 加载状态 -->
@@ -161,9 +168,9 @@
 
             <!-- 底部分页 -->
             <div class="pagination" id="pagination" style="display: none;">
-                <button id="prev-page" class="btn btn-secondary" disabled>上一页</button>
+                <button id="prev-page" class="btn btn-secondary" disabled>← 上一页</button>
                 <span id="page-info">第 1 页 / 共 1 页</span>
-                <button id="next-page" class="btn btn-secondary" disabled>下一页</button>
+                <button id="next-page" class="btn btn-secondary" disabled>下一页 →</button>
             </div>
         </div>
 
@@ -300,6 +307,7 @@
                             </div>
                         </div>
                         <div class="modal-actions">
+                            <button id="favorite-detail-btn" class="btn btn-secondary">❤️ 收藏</button>
                             <button id="download-btn" class="btn btn-primary">下载</button>
                             <button id="reanalyze-btn" class="btn btn-warning">🔍 重新分析</button>
                             <button id="delete-single-btn" class="btn btn-danger">删除</button>
