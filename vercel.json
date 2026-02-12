@@ -2,9 +2,18 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "framework": "fastapi",
+  "buildCommand": "pip install -r requirements.txt",
+  "installCommand": "pip install --upgrade pip",
   "env": {
     "LOG_LEVEL": "INFO",
     "LOG_FILE_ENABLED": "false",
-    "DATA_DIR": "/tmp/data"
+    "DATA_DIR": "/tmp/data",
+    "SERVER_STORAGE_TYPE": "local",
+    "SERVER_STORAGE_URL": ""
+  },
+  "build": {
+    "env": {
+      "PYTHON_VERSION": "3.12"
+    }
   }
 }
