@@ -33,6 +33,7 @@ from app.api.v1.gallery import router as gallery_router  # noqa: E402
 from app.api.v1.gallery_backup import router as gallery_backup_router  # noqa: E402
 from app.api.v1.prompt import router as prompt_router  # noqa: E402
 from app.api.v1.prompts import router as prompts_router  # noqa: E402
+from app.api.v1.qrcode import router as qrcode_router  # noqa: E402
 from app.services.token import get_scheduler  # noqa: E402
 
 
@@ -123,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(gallery_router)
     app.include_router(gallery_backup_router, prefix="/api/v1/gallery")
     app.include_router(prompts_router)
+    app.include_router(qrcode_router)  # 二维码路由
 
     # 静态文件服务
     from fastapi.staticfiles import StaticFiles

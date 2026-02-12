@@ -1,0 +1,134 @@
+<!-- 二维码弹窗 -->
+<div id="qrcode-modal" class="qrcode-modal" style="display: none;">
+    <div class="qrcode-modal-content">
+        <span class="qrcode-modal-close" onclick="closeQRCodeModal()">&times;</span>
+        <h2 style="text-align: center; margin-bottom: 20px;">手机扫码访问</h2>
+        <div class="qrcode-container">
+            <img id="qrcode-image" src="" alt="二维码" style="width: 300px; height: 300px; display: block; margin: 0 auto;">
+        </div>
+        <div class="qrcode-info">
+            <p style="text-align: center; margin-top: 20px; color: #666;">
+                <strong>局域网地址：</strong><span id="qrcode-url">-</span>
+            </p>
+            <p style="text-align: center; color: #999; font-size: 14px; margin-top: 10px;">
+                请确保手机和电脑在同一局域网内
+            </p>
+        </div>
+    </div>
+</div>
+
+<style>
+.qrcode-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    animation: fadeIn 0.3s ease;
+}
+
+.qrcode-modal-content {
+    background: white;
+    border-radius: 12px;
+    padding: 30px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    animation: scaleIn 0.3s ease;
+    position: relative;
+}
+
+.qrcode-modal-close {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    font-size: 2rem;
+    cursor: pointer;
+    color: #999;
+    line-height: 1;
+    transition: color 0.2s;
+}
+
+.qrcode-modal-close:hover {
+    color: #333;
+}
+
+.qrcode-container {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    border: 2px solid #f0f0f0;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        transform: scale(0.9);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+</style>
+
+<script>
+async function showQRCodeModal() {
+    try {
+        // 获取当前端口
+        const port = window.location.port || (window.location.protocol === 'https:' ? 443 : 80);
+        const path = window.location.pathname;
+        
+        // 获取二维码信息
+        const response = await fetch(`/api/v1/qrcode/info?port=${port}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const fullUrl = data.data.url + path;
+            const qrcodeUrl = `/api/v1/qrcode/generate?port=${port}&path=${encodeURIComponent(path)}`;
+            
+            // 显示二维码
+            document.getElementById('qrcode-image').src = qrcodeUrl;
+            document.getElementById('qrcode-url').textContent = fullUrl;
+            document.getElementById('qrcode-modal').style.display = 'flex';
+        } else {
+            alert('获取二维码失败：' + data.error);
+        }
+    } catch (error) {
+        console.error('显示二维码失败:', error);
+        alert('显示二维码失败，请重试');
+    }
+}
+
+function closeQRCodeModal() {
+    document.getElementById('qrcode-modal').style.display = 'none';
+}
+
+// ESC 键关闭
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeQRCodeModal();
+    }
+});
+
+// 点击背景关闭
+document.getElementById('qrcode-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'qrcode-modal') {
+        closeQRCodeModal();
+    }
+});
+</script>
