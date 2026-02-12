@@ -20,6 +20,7 @@ body {
   background-color: var(--bg);
   color: var(--fg);
   -webkit-font-smoothing: antialiased;
+  padding-top: 56px; /* 为固定导航栏留出空间 */
 }
 
 #app-header {

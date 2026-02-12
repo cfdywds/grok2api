@@ -5,7 +5,7 @@ html, body {
   height: 100%;
   overflow: hidden;
   margin: 0;
-  padding: 0;
+  padding: 0 !important; /* 覆盖 common.css 的 padding-top，因为此页面使用固定定位 */
 }
 
 .random-viewer {
