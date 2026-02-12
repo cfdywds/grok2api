@@ -196,7 +196,7 @@ async def list_images(
         service = get_image_metadata_service()
 
         # 调试日志
-        logger.info(f"API 接收参数: min_quality_score={min_quality_score}, max_quality_score={max_quality_score}")
+        logger.info(f"API 接收参数: min_quality_score={min_quality_score}, max_quality_score={max_quality_score}, favorite={favorite}")
 
         # 构建筛选条件
         filters = ImageFilter(
