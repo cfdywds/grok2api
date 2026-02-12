@@ -225,14 +225,17 @@ async function fetchImages() {
         const response = await fetch(`${API_BASE}/images?${params}`);
         const data = await response.json();
 
-        state.images = data.images;
-        state.total = data.total;
-        state.totalPages = data.total_pages;
+        state.images = Array.isArray(data.images) ? data.images : [];
+        state.total = data.total || 0;
+        state.totalPages = data.total_pages || 0;
 
         renderImages();
         updatePagination();
     } catch (error) {
         console.error('获取图片列表失败:', error);
+        state.images = [];
+        state.total = 0;
+        state.totalPages = 0;
         showEmpty();
     }
 }
