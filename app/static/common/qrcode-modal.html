@@ -100,17 +100,29 @@ async function showQRCodeModal() {
         if (data.success) {
             const fullUrl = data.data.url + path;
             const qrcodeUrl = `/api/v1/qrcode/generate?port=${port}&path=${encodeURIComponent(path)}`;
-            
+
             // 显示二维码
             document.getElementById('qrcode-image').src = qrcodeUrl;
             document.getElementById('qrcode-url').textContent = fullUrl;
             document.getElementById('qrcode-modal').style.display = 'flex';
         } else {
-            alert('获取二维码失败：' + data.error);
+            if (typeof Dialog !== 'undefined' && Dialog.alert) {
+                Dialog.alert({
+                    title: '获取失败',
+                    message: '获取二维码失败：' + data.error,
+                    type: 'error'
+                });
+            }
         }
     } catch (error) {
         console.error('显示二维码失败:', error);
-        alert('显示二维码失败，请重试');
+        if (typeof Dialog !== 'undefined' && Dialog.alert) {
+            Dialog.alert({
+                title: '显示失败',
+                message: '显示二维码失败，请重试',
+                type: 'error'
+            });
+        }
     }
 }
 

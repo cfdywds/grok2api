@@ -1,0 +1,154 @@
+/* 通用对话框样式 */
+.common-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.common-dialog-content {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: scaleIn 0.2s ease;
+  text-align: center;
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.common-dialog-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.common-dialog-icon.warning {
+  color: #f59e0b;
+}
+
+.common-dialog-icon.danger {
+  color: #ef4444;
+}
+
+.common-dialog-icon.info {
+  color: #3b82f6;
+}
+
+.common-dialog-icon.success {
+  color: #10b981;
+}
+
+.common-dialog-icon.error {
+  color: #ef4444;
+}
+
+.common-dialog-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 12px;
+}
+
+.common-dialog-message {
+  font-size: 15px;
+  color: #666;
+  line-height: 1.6;
+  margin-bottom: 24px;
+  white-space: pre-line;
+}
+
+.common-dialog-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.common-dialog-btn {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 80px;
+}
+
+.common-dialog-btn.cancel-btn {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.common-dialog-btn.cancel-btn:hover {
+  background: #e5e5e5;
+}
+
+.common-dialog-btn.confirm-btn {
+  background: #3b82f6;
+  color: white;
+}
+
+.common-dialog-btn.confirm-btn:hover {
+  background: #2563eb;
+}
+
+.common-dialog-btn.confirm-btn.warning {
+  background: #f59e0b;
+}
+
+.common-dialog-btn.confirm-btn.warning:hover {
+  background: #d97706;
+}
+
+.common-dialog-btn.confirm-btn.danger {
+  background: #ef4444;
+}
+
+.common-dialog-btn.confirm-btn.danger:hover {
+  background: #dc2626;
+}
+
+.common-dialog-btn.confirm-btn.success {
+  background: #10b981;
+}
+
+.common-dialog-btn.confirm-btn.success:hover {
+  background: #059669;
+}

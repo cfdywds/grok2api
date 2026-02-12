@@ -399,7 +399,15 @@ async function copyPrompt(prompt) {
 
 // 删除提示词
 async function deletePrompt(promptId) {
-  if (!confirm('确定要删除这个提示词吗？')) return;
+  const confirmed = await Dialog.confirm({
+    title: '确认删除',
+    message: '确定要删除这个提示词吗？',
+    confirmText: '删除',
+    cancelText: '取消',
+    type: 'danger'
+  });
+
+  if (!confirmed) return;
 
   try {
     const response = await fetch('/api/v1/admin/prompts/delete', {

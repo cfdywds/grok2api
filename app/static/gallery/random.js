@@ -14,12 +14,16 @@ const elements = {
   emptyState: null,
   mainImage: null,
   favoriteBtn: null,
+  favoriteBtnMobile: null,
   infoPanel: null,
   infoToggleBtn: null,
+  infoToggleBtnMobile: null,
   prevBtn: null,
   nextBtn: null,
   deleteBtn: null,
+  deleteBtnMobile: null,
   downloadBtn: null,
+  downloadBtnMobile: null,
   resetBtn: null,
 };
 
@@ -31,12 +35,16 @@ document.addEventListener('DOMContentLoaded', () => {
   elements.emptyState = document.getElementById('empty-state');
   elements.mainImage = document.getElementById('main-image');
   elements.favoriteBtn = document.getElementById('favorite-btn');
+  elements.favoriteBtnMobile = document.getElementById('favorite-btn-mobile');
   elements.infoPanel = document.getElementById('info-panel');
   elements.infoToggleBtn = document.getElementById('info-toggle-btn');
+  elements.infoToggleBtnMobile = document.getElementById('info-toggle-btn-mobile');
   elements.prevBtn = document.getElementById('prev-btn');
   elements.nextBtn = document.getElementById('next-btn');
   elements.deleteBtn = document.getElementById('delete-btn');
+  elements.deleteBtnMobile = document.getElementById('delete-btn-mobile');
   elements.downloadBtn = document.getElementById('download-btn');
+  elements.downloadBtnMobile = document.getElementById('download-btn-mobile');
   elements.resetBtn = document.getElementById('reset-btn');
 
   // 绑定事件
@@ -50,21 +58,25 @@ document.addEventListener('DOMContentLoaded', () => {
 function bindEvents() {
   // 收藏按钮
   elements.favoriteBtn.addEventListener('click', handleFavoriteClick);
+  elements.favoriteBtnMobile.addEventListener('click', handleFavoriteClick);
 
   // 导航按钮
-  elements.prevBtn.addEventListener('click', () => loadRandomImage());
-  elements.nextBtn.addEventListener('click', () => loadRandomImage());
+  elements.prevBtn.addEventListener('click', () => loadRandomImage('left'));
+  elements.nextBtn.addEventListener('click', () => loadRandomImage('right'));
 
   // 信息面板切换
   elements.infoToggleBtn.addEventListener('click', toggleInfoPanel);
+  elements.infoToggleBtnMobile.addEventListener('click', toggleInfoPanel);
 
   // 操作按钮
   elements.deleteBtn.addEventListener('click', handleDeleteClick);
+  elements.deleteBtnMobile.addEventListener('click', handleDeleteClick);
   elements.downloadBtn.addEventListener('click', handleDownloadClick);
+  elements.downloadBtnMobile.addEventListener('click', handleDownloadClick);
   elements.resetBtn.addEventListener('click', handleResetClick);
 
   // 点击图片切换到下一张
-  elements.mainImage.addEventListener('click', () => loadRandomImage());
+  elements.mainImage.addEventListener('click', () => loadRandomImage('right'));
 
   // 键盘事件
   document.addEventListener('keydown', handleKeyDown);
@@ -72,21 +84,29 @@ function bindEvents() {
   // 触摸事件（移动端滑动）
   let touchStartX = 0;
   let touchEndX = 0;
+  let touchStartY = 0;
+  let touchEndY = 0;
 
   elements.imageContainer.addEventListener('touchstart', (e) => {
     touchStartX = e.changedTouches[0].screenX;
+    touchStartY = e.changedTouches[0].screenY;
   });
 
   elements.imageContainer.addEventListener('touchend', (e) => {
     touchEndX = e.changedTouches[0].screenX;
+    touchEndY = e.changedTouches[0].screenY;
     handleSwipe();
   });
 
   function handleSwipe() {
-    const diff = touchStartX - touchEndX;
-    if (Math.abs(diff) > 50) {
-      // 滑动距离超过 50px
-      loadRandomImage();
+    const diffX = touchStartX - touchEndX;
+    const diffY = Math.abs(touchStartY - touchEndY);
+
+    // 只有水平滑动距离大于垂直滑动距离时才触发
+    if (Math.abs(diffX) > 50 && Math.abs(diffX) > diffY) {
+      // 向左滑动显示下一张，向右滑动也显示下一张（随机）
+      const direction = diffX > 0 ? 'left' : 'right';
+      loadRandomImage(direction);
     }
   }
 }
@@ -103,10 +123,13 @@ function handleKeyDown(e) {
 
   switch (e.key) {
     case 'ArrowLeft':
+      e.preventDefault();
+      loadRandomImage('left');
+      break;
     case 'ArrowRight':
     case ' ': // 空格键
       e.preventDefault();
-      loadRandomImage();
+      loadRandomImage('right');
       break;
     case 'f':
     case 'F':
@@ -133,8 +156,14 @@ function handleKeyDown(e) {
 }
 
 // 加载随机图片
-async function loadRandomImage() {
+async function loadRandomImage(direction = null) {
   try {
+    // 添加退出动画
+    if (state.currentImage && direction) {
+      elements.mainImage.classList.add(direction === 'left' ? 'slide-left' : 'slide-right');
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
     showLoading();
 
     // 构建排除 ID 列表
@@ -176,9 +205,17 @@ function showLoading() {
 function showImage() {
   const img = state.currentImage;
 
+  // 移除旧的动画类
+  elements.mainImage.classList.remove('slide-left', 'slide-right', 'fade-in');
+
   // 设置图片
   elements.mainImage.src = `/data/tmp/image/${img.filename}`;
   elements.mainImage.alt = img.prompt;
+
+  // 添加进入动画
+  setTimeout(() => {
+    elements.mainImage.classList.add('fade-in');
+  }, 50);
 
   // 更新收藏按钮
   updateFavoriteButton(img.favorite || false);
@@ -201,13 +238,18 @@ function showEmpty() {
 
 // 更新收藏按钮
 function updateFavoriteButton(favorited) {
-  if (favorited) {
-    elements.favoriteBtn.classList.add('favorited');
-    elements.favoriteBtn.title = '取消收藏';
-  } else {
-    elements.favoriteBtn.classList.remove('favorited');
-    elements.favoriteBtn.title = '收藏';
-  }
+  const updateBtn = (btn) => {
+    if (favorited) {
+      btn.classList.add('favorited');
+      btn.title = '取消收藏';
+    } else {
+      btn.classList.remove('favorited');
+      btn.title = '收藏';
+    }
+  };
+
+  updateBtn(elements.favoriteBtn);
+  updateBtn(elements.favoriteBtnMobile);
 }
 
 // 更新信息面板
@@ -238,7 +280,21 @@ function updateInfoPanel(img) {
 
 // 切换信息面板
 function toggleInfoPanel() {
-  elements.infoPanel.classList.toggle('collapsed');
+  // 在移动端，使用 Toast 显示信息而不是面板
+  if (window.innerWidth <= 768) {
+    if (!state.currentImage) return;
+
+    const img = state.currentImage;
+    const qualityScore = img.quality_score || 0;
+    const sizeText = img.width && img.height
+      ? `${img.width} × ${img.height}`
+      : '-';
+
+    const message = `质量: ${qualityScore.toFixed(1)} | 尺寸: ${sizeText}`;
+    showToast(message, 'info');
+  } else {
+    elements.infoPanel.classList.toggle('collapsed');
+  }
 }
 
 // 处理收藏点击
@@ -298,7 +354,7 @@ async function handleDeleteClick() {
     if (result.success) {
       showToast('删除成功', 'success');
       // 加载下一张
-      loadRandomImage();
+      loadRandomImage('right');
     } else {
       showToast('删除失败', 'error');
     }

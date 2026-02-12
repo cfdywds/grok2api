@@ -1124,8 +1124,6 @@
       console.warn('[优化] 提示词为空');
       if (typeof showToast === 'function') {
         showToast('请先输入提示词', 'warning');
-      } else {
-        alert('请先输入提示词');
       }
       return;
     }
@@ -1156,8 +1154,6 @@
           console.error('[优化] 未获取到 API Key');
           if (typeof showToast === 'function') {
             showToast('请先登录后台 (/admin)', 'error');
-          } else {
-            alert('请先访问 /admin 页面登录后台');
           }
           return;
         }
@@ -1208,8 +1204,6 @@
         const errorMessage = error.message || '优化失败';
         if (typeof showToast === 'function') {
           showToast('优化失败: ' + errorMessage, 'error');
-        } else {
-          alert('优化失败: ' + errorMessage + '\n\n请按 F12 打开控制台查看详细错误信息');
         }
       } finally {
         if (optimizePromptBtn) {

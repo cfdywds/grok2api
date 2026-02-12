@@ -180,7 +180,17 @@ function confirmAction(message, options = {}) {
   ensureUI();
   const dialog = ui.confirmDialog;
   if (!dialog || typeof dialog.showModal !== 'function') {
-    return Promise.resolve(window.confirm(message));
+    // 使用通用 Dialog 组件作为后备
+    if (typeof Dialog !== 'undefined' && Dialog.confirm) {
+      return Dialog.confirm({
+        title: options.title || '确认操作',
+        message: message,
+        confirmText: options.okText || '确定',
+        cancelText: options.cancelText || '取消',
+        type: options.type || 'warning'
+      });
+    }
+    return Promise.resolve(false);
   }
   if (ui.confirmMessage) ui.confirmMessage.textContent = message;
   if (ui.confirmOk) ui.confirmOk.textContent = options.okText || '确定';

@@ -6,7 +6,7 @@ function loadUserPreferences() {
     const savedViewMode = localStorage.getItem('gallery_view_mode');
 
     return {
-        pageSize: savedPageSize ? parseInt(savedPageSize) : 50,
+        pageSize: savedPageSize ? parseInt(savedPageSize) : 100,
         viewMode: savedViewMode || 'grid'
     };
 }
@@ -34,10 +34,10 @@ const state = {
         favorite: null,
     },
     currentImageId: null,
-    currentImageIndex: -1, // 当前图片在列表中的索引
+    currentImageIndex: -1,
     analysisState: {
-        mode: 'all',        // 'all' 或 'skip'
-        maxWorkers: 8       // 4-16
+        mode: 'all',
+        maxWorkers: 8
     },
 };
 
@@ -698,37 +698,28 @@ function updateSelectionUI() {
 function updatePagination() {
     const pagination = document.getElementById('pagination');
     const paginationTop = document.getElementById('pagination-top');
+    const pageInfo = document.getElementById('page-info');
+    const pageInfoTop = document.getElementById('page-info-top');
     const prevBtn = document.getElementById('prev-page');
     const nextBtn = document.getElementById('next-page');
     const prevBtnTop = document.getElementById('prev-page-top');
     const nextBtnTop = document.getElementById('next-page-top');
-    const pageInfo = document.getElementById('page-info');
-    const pageInfoTop = document.getElementById('page-info-top');
 
-    if (state.totalPages <= 1) {
+    if (state.totalPages > 0) {
+        pagination.style.display = 'flex';
+        paginationTop.style.display = 'flex';
+
+        pageInfo.textContent = `第 ${state.currentPage} 页 / 共 ${state.totalPages} 页`;
+        pageInfoTop.textContent = `第 ${state.currentPage} 页 / 共 ${state.totalPages} 页`;
+
+        prevBtn.disabled = state.currentPage === 1;
+        nextBtn.disabled = state.currentPage === state.totalPages;
+        prevBtnTop.disabled = state.currentPage === 1;
+        nextBtnTop.disabled = state.currentPage === state.totalPages;
+    } else {
         pagination.style.display = 'none';
         paginationTop.style.display = 'none';
-        return;
     }
-
-    pagination.style.display = 'flex';
-    paginationTop.style.display = 'flex';
-
-    // 计算当前显示的图片范围
-    const startIndex = (state.currentPage - 1) * state.pageSize + 1;
-    const endIndex = Math.min(state.currentPage * state.pageSize, state.total);
-
-    const pageText = `第 ${state.currentPage} / ${state.totalPages} 页 (${startIndex}-${endIndex} / 共 ${state.total} 张)`;
-    pageInfo.textContent = pageText;
-    pageInfoTop.textContent = pageText;
-
-    const prevDisabled = state.currentPage <= 1;
-    const nextDisabled = state.currentPage >= state.totalPages;
-
-    prevBtn.disabled = prevDisabled;
-    nextBtn.disabled = nextDisabled;
-    prevBtnTop.disabled = prevDisabled;
-    nextBtnTop.disabled = nextDisabled;
 }
 
 function showLoading() {
@@ -954,6 +945,17 @@ function initEventListeners() {
         fetchImages();
     });
 
+    // 分页大小变化
+    document.getElementById('page-size-filter').addEventListener('change', (e) => {
+        state.pageSize = parseInt(e.target.value);
+        state.currentPage = 1;
+
+        // 保存用户偏好
+        localStorage.setItem('gallery_page_size', state.pageSize);
+
+        fetchImages();
+    });
+
     // 重置按钮
     document.getElementById('reset-btn').addEventListener('click', () => {
         document.getElementById('search-input').value = '';
@@ -962,7 +964,7 @@ function initEventListeners() {
         document.getElementById('sort-filter').value = 'created_at:desc';
         document.getElementById('quality-filter').value = '';
         document.getElementById('favorite-filter').value = '';
-        document.getElementById('page-size-filter').value = '50';
+        document.getElementById('page-size-filter').value = '100';
 
         state.filters = {
             search: '',
@@ -976,7 +978,7 @@ function initEventListeners() {
             favorite: null,
         };
 
-        state.pageSize = 50;
+        state.pageSize = 100;
         state.currentPage = 1;
         fetchImages();
     });
@@ -1450,8 +1452,16 @@ async function toggleFavorite(imageId, favorite) {
             if (image) {
                 image.favorite = favorite;
             }
-            // 重新渲染图片列表
-            renderImages();
+            // 只更新这一张图片的UI，不重新渲染整个列表
+            const card = document.querySelector(`.image-card[data-id="${imageId}"]`);
+            if (card) {
+                const favoriteBtn = card.querySelector('.favorite-btn');
+                if (favoriteBtn) {
+                    favoriteBtn.classList.toggle('favorited', favorite);
+                    favoriteBtn.textContent = favorite ? '❤️' : '🤍';
+                    favoriteBtn.title = favorite ? '取消收藏' : '收藏';
+                }
+            }
         } else {
             Toast.error('操作失败，请重试');
         }

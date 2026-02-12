@@ -6,6 +6,7 @@
   <title>随机图片查看 - Grok2API</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="/static/common/common.css">
+  <link rel="stylesheet" href="/static/common/dialog.css">
   <link rel="stylesheet" href="/static/gallery/random.css">
 </head>
 <body>
@@ -45,7 +46,7 @@
 
     <!-- 图片容器 -->
     <div id="image-container" class="image-container" style="display: none;">
-      <!-- 顶部操作栏 -->
+      <!-- 顶部操作栏 - 桌面端 -->
       <div class="top-toolbar">
         <button id="favorite-btn" class="toolbar-btn favorite-btn" title="收藏 (F)">
           <svg class="heart-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -70,6 +71,35 @@
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="16" x2="12" y2="12"></line>
             <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- 底部操作栏 - 移动端 -->
+      <div class="mobile-toolbar">
+        <button id="info-toggle-btn-mobile" class="toolbar-btn" title="信息">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+        </button>
+        <button id="favorite-btn-mobile" class="toolbar-btn favorite-btn" title="收藏">
+          <svg class="heart-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+          </svg>
+        </button>
+        <button id="download-btn-mobile" class="toolbar-btn" title="下载">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </button>
+        <button id="delete-btn-mobile" class="toolbar-btn delete-btn" title="删除">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
           </svg>
         </button>
       </div>
@@ -131,6 +161,7 @@
     </div>
   </div>
 
+  <script src="/static/common/dialog.js"></script>
   <script src="/static/gallery/random.js"></script>
   <script>
     // 加载导航栏

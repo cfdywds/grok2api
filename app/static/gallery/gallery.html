@@ -6,6 +6,7 @@
     <title>图片管理 - Grok2API</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/static/common/common.css">
+    <link rel="stylesheet" href="/static/common/dialog.css">
     <link rel="stylesheet" href="/static/gallery/gallery.css">
 </head>
 <body>
@@ -91,10 +92,10 @@
                         <option value="false">未收藏</option>
                     </select>
                     <select id="page-size-filter" class="filter-select" title="每页显示数量">
-                        <option value="20">20/页</option>
-                        <option value="50" selected>50/页</option>
-                        <option value="100">100/页</option>
+                        <option value="100" selected>100/页</option>
                         <option value="200">200/页</option>
+                        <option value="400">400/页</option>
+                        <option value="500">500/页</option>
                     </select>
                     <button id="filter-btn" class="btn btn-primary">筛选</button>
                     <button id="reset-btn" class="btn btn-secondary">重置</button>
@@ -353,6 +354,7 @@
         </div>
     </div>
 
+    <script src="/static/common/dialog.js"></script>
     <script src="/static/gallery/gallery.js?v=1.2.1"></script>
     <script>
         // 加载导航栏
