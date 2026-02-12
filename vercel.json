@@ -4,6 +4,12 @@
   "framework": "fastapi",
   "buildCommand": "pip install -r requirements.txt",
   "installCommand": "pip install --upgrade pip",
+  "git": {
+    "deploymentEnabled": {
+      "navy": true,
+      "main": false
+    }
+  },
   "env": {
     "LOG_LEVEL": "INFO",
     "LOG_FILE_ENABLED": "false",
