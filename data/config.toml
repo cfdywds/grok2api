@@ -22,6 +22,8 @@ stream = true
 thinking = true
 dynamic_statsig = true
 filter_tags = ["xaiartifact","xai:tool_usage_card","grok:render"]
+max_message_length = 32000
+auto_truncate_message = true
 
 [retry]
 max_retry = 3
