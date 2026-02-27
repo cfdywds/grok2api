@@ -1,13 +1,24 @@
+# ── Stage 1: 安装依赖 ──────────────────────────────────────────
+FROM python:3.13-slim AS builder
+
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
+
+COPY pyproject.toml uv.lock ./
+
+RUN uv sync --frozen --no-dev --no-install-project
+
+# ── Stage 2: 运行镜像（不含 uv 工具链）──────────────────────────
 FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TZ=Asia/Shanghai \
-    # 把 uv 包安装到系统 Python 环境
-    UV_PROJECT_ENVIRONMENT=/opt/venv
+    TZ=Asia/Shanghai
 
-# 确保 uv 的 bin 目录
-ENV PATH="$UV_PROJECT_ENVIRONMENT/bin:$PATH"
+ENV PATH="/opt/venv/bin:$PATH"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tzdata ca-certificates \
@@ -15,12 +26,8 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# 安装 uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
-COPY pyproject.toml uv.lock ./
-
-RUN uv sync --frozen --no-dev --no-install-project
+# 仅复制已安装的依赖，不引入 uv、pyproject.toml、uv.lock
+COPY --from=builder /opt/venv /opt/venv
 
 COPY config.defaults.toml ./
 COPY app ./app
