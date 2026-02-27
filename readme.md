@@ -302,6 +302,8 @@ curl http://localhost:8000/v1/images/edits \
 |                       | `thinking`                     | 思维链             | 是否启用模型思维链输出。                              | `true`                                                  |
 |                       | `dynamic_statsig`              | 动态指纹           | 是否启用动态生成 Statsig 值。                         | `true`                                                  |
 |                       | `filter_tags`                  | 过滤标签           | 自动过滤 Grok 响应中的特殊标签。                      | `["xaiartifact", "xai:tool_usage_card", "grok:render"]` |
+|                       | `max_message_length`           | 最大消息长度       | 单次请求的最大消息字符数，0 表示不限制。              | `32000`                                                 |
+|                       | `auto_truncate_message`        | 自动截断消息       | 当消息超过长度限制时是否自动截断（保留前后部分）。    | `true`                                                  |
 | **retry**       | `max_retry`                    | 最大重试           | 请求 Grok 服务失败时的最大重试次数。                  | `3`                                                     |
 |                       | `retry_status_codes`           | 重试状态码         | 触发重试的 HTTP 状态码列表。                          | `[401, 429, 403]`                                       |
 |                       | `retry_backoff_base`           | 退避基数           | 重试退避的基础延迟（秒）。                            | `0.5`                                                   |

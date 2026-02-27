@@ -29,7 +29,8 @@ const NUMERIC_FIELDS = new Set([
   'image_ws_medium_min_bytes',
   'nsfw_max_concurrent',
   'nsfw_batch_size',
-  'nsfw_max_tokens'
+  'nsfw_max_tokens',
+  'max_message_length'
 ]);
 
 const LOCALE_MAP = {
@@ -60,7 +61,9 @@ const LOCALE_MAP = {
     "stream": { title: "流式响应", desc: "是否默认启用流式输出。" },
     "thinking": { title: "思维链", desc: "是否启用模型思维链输出。" },
     "dynamic_statsig": { title: "动态指纹", desc: "是否启用动态生成 Statsig 值。" },
-    "filter_tags": { title: "过滤标签", desc: "自动过滤 Grok 响应中的特殊标签。" }
+    "filter_tags": { title: "过滤标签", desc: "自动过滤 Grok 响应中的特殊标签。" },
+    "max_message_length": { title: "最大消息长度", desc: "单次请求的最大消息字符数，0 表示不限制。推荐 32000。" },
+    "auto_truncate_message": { title: "自动截断消息", desc: "当消息超过长度限制时是否自动截断（保留前后部分）。" }
   },
   "retry": {
     "label": "重试策略",

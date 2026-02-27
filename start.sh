@@ -40,6 +40,9 @@ echo ""
 echo "按 Ctrl+C 停止服务"
 echo ""
 
+# 设置 Python 输出编码为 UTF-8，避免中文乱码
+export PYTHONIOENCODING=utf-8
+
 if [ -f ".venv/bin/python" ]; then
     .venv/bin/python main.py
 else

@@ -245,6 +245,8 @@ Config file: `data/config.toml`
 | | `thinking` | Thinking chain | Enable model thinking output. | `true` |
 | | `dynamic_statsig` | Dynamic fingerprint | Enable dynamic Statsig value generation. | `true` |
 | | `filter_tags` | Filter tags | Auto-filter special tags in Grok responses. | `["xaiartifact", "xai:tool_usage_card", "grok:render"]` |
+| | `max_message_length` | Max message length | Maximum message characters per request, 0 for unlimited. | `32000` |
+| | `auto_truncate_message` | Auto truncate | Auto-truncate messages exceeding length limit (keep front/back). | `true` |
 | **retry** | `max_retry` | Max retries | Max retries on Grok request failure. | `3` |
 | | `retry_status_codes` | Retry status codes | HTTP status codes that trigger retry. | `[401, 429, 403]` |
 | | `retry_backoff_base` | Backoff base | Base delay for retry backoff (seconds). | `0.5` |

@@ -30,6 +30,8 @@ GROK_DEFAULTS = {
         "thinking": False,
         "dynamic_statsig": True,
         "filter_tags": ["grok:render", "xaiartifact", "xai:tool_usage_card"],
+        "max_message_length": 32000,
+        "auto_truncate_message": True,
     },
     "retry": {
         "max_retry": 3,

@@ -10,8 +10,13 @@
 
 #### 方法 1：使用启动脚本（推荐）
 
-**Windows:**
-```bash
+**Windows (PowerShell 7.x):**
+```powershell
+.\start.ps1
+```
+
+**Windows (CMD/批处理):**
+```cmd
 start.bat
 ```
 
@@ -66,8 +71,13 @@ uv sync
 
 使用启动脚本（推荐）：
 
-**Windows:**
-```bash
+**Windows (PowerShell 7.x):**
+```powershell
+.\start.ps1
+```
+
+**Windows (CMD/批处理):**
+```cmd
 start.bat
 ```
 

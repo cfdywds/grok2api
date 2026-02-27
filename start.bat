@@ -40,4 +40,7 @@ echo.
 echo 按 Ctrl+C 停止服务
 echo.
 
+REM 设置 Python 输出编码为 UTF-8，避免中文乱码
+set PYTHONIOENCODING=utf-8
+
 .venv\Scripts\python.exe main.py

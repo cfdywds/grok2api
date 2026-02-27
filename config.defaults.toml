@@ -46,6 +46,10 @@ thinking = true
 dynamic_statsig = true
 # 过滤的特殊标签列表
 filter_tags = ["xaiartifact","xai:tool_usage_card","grok:render"]
+# 最大消息长度（字符数，0 表示不限制）
+max_message_length = 32000
+# 是否自动截断过长的消息
+auto_truncate_message = true
 
 
 # ==================== 重试策略 ====================

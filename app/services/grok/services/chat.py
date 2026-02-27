@@ -42,6 +42,27 @@ class MessageExtractor:
     """消息内容提取器"""
 
     @staticmethod
+    def truncate_message(message: str, max_length: int) -> tuple[str, bool]:
+        """截断消息到指定长度，返回 (truncated_message, was_truncated)"""
+        if max_length <= 0 or len(message) <= max_length:
+            return message, False
+
+        # 保留前 80% 和后 20% 的内容
+        front_length = int(max_length * 0.8)
+        back_length = max_length - front_length - 50  # 留 50 字符给提示信息
+
+        truncated = (
+            message[:front_length]
+            + "\n\n[... 内容过长已自动截断，省略中间部分 ...]\n\n"
+            + message[-back_length:]
+        )
+
+        logger.warning(
+            f"消息长度 {len(message)} 超过限制 {max_length}，已自动截断"
+        )
+        return truncated, True
+
+    @staticmethod
     def extract(
         messages: List[Dict[str, Any]], is_video: bool = False
     ) -> tuple[str, List[tuple[str, str]]]:
@@ -116,7 +137,23 @@ class MessageExtractor:
             text = item["text"]
             texts.append(text if i == last_user_index else f"{role}: {text}")
 
-        return "\n\n".join(texts), attachments
+        final_message = "\n\n".join(texts)
+
+        # 检查并截断过长的消息
+        max_length = get_config("chat.max_message_length")
+        auto_truncate = get_config("chat.auto_truncate_message")
+
+        if max_length > 0 and auto_truncate and len(final_message) > max_length:
+            final_message, was_truncated = MessageExtractor.truncate_message(
+                final_message, max_length
+            )
+            if was_truncated:
+                logger.info(
+                    f"消息已自动截断: 原长度={len('\n\n'.join(texts))}, "
+                    f"截断后={len(final_message)}, 限制={max_length}"
+                )
+
+        return final_message, attachments
 
 
 class ChatRequestBuilder:
