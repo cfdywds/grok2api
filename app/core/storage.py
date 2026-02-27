@@ -644,9 +644,9 @@ class SQLStorage(BaseStorage):
     """
 
     @staticmethod
-    def _resolve_ipv4(url: str) -> tuple[str, str]:
+    def _resolve_ip(url: str) -> tuple[str, str]:
         """
-        将 URL 中的域名强制解析为 IPv4 地址
+        将 URL 中的域名解析为 IP 地址（优先 IPv4，回退 IPv6）
         避免容器环境下 IPv6 路由不可达 (ENETUNREACH) 问题
 
         Returns:
@@ -668,15 +668,41 @@ class SQLStorage(BaseStorage):
             except OSError:
                 pass
 
-            ipv4_info = socket.getaddrinfo(hostname, None, socket.AF_INET)
-            if ipv4_info:
-                ipv4_addr = ipv4_info[0][4][0]
-                new_netloc = parsed.netloc.replace(hostname, ipv4_addr)
-                modified_url = urlunparse(parsed._replace(netloc=new_netloc))
-                logger.info(f"SQLStorage: Resolved {hostname} -> {ipv4_addr} (IPv4)")
-                return modified_url, hostname
+            # 已经是 IPv6 地址则跳过
+            try:
+                socket.inet_pton(socket.AF_INET6, hostname)
+                return url, ""
+            except OSError:
+                pass
+
+            # 优先尝试 IPv4
+            try:
+                ipv4_info = socket.getaddrinfo(hostname, None, socket.AF_INET)
+                if ipv4_info:
+                    ip_addr = ipv4_info[0][4][0]
+                    new_netloc = parsed.netloc.replace(hostname, ip_addr)
+                    modified_url = urlunparse(parsed._replace(netloc=new_netloc))
+                    logger.info(f"SQLStorage: Resolved {hostname} -> {ip_addr} (IPv4)")
+                    return modified_url, hostname
+            except Exception:
+                pass
+
+            # IPv4 失败，回退 IPv6（如 Zeabur 内部域名仅有 AAAA 记录）
+            try:
+                ipv6_info = socket.getaddrinfo(hostname, None, socket.AF_INET6)
+                if ipv6_info:
+                    ip_addr = ipv6_info[0][4][0]
+                    # IPv6 地址需用方括号包裹
+                    bracketed = f"[{ip_addr}]"
+                    new_netloc = parsed.netloc.replace(hostname, bracketed)
+                    modified_url = urlunparse(parsed._replace(netloc=new_netloc))
+                    logger.info(f"SQLStorage: Resolved {hostname} -> {ip_addr} (IPv6)")
+                    return modified_url, hostname
+            except Exception as e:
+                logger.warning(f"SQLStorage: IPv6 resolution failed: {e}")
+
         except Exception as e:
-            logger.warning(f"SQLStorage: IPv4 resolution failed: {e}")
+            logger.warning(f"SQLStorage: IP resolution failed: {e}")
 
         return url, ""
 
@@ -690,9 +716,9 @@ class SQLStorage(BaseStorage):
 
         self.dialect = url.split(":", 1)[0].split("+", 1)[0].lower()
 
-        # 容器环境下强制 IPv4 解析，避免 IPv6 路由不可达
+        # 容器环境下优先 IPv4、回退 IPv6 解析，避免路由不可达
         connect_args = {}
-        resolved_url, original_host = self._resolve_ipv4(url)
+        resolved_url, original_host = self._resolve_ip(url)
         if original_host:
             url = resolved_url
             # asyncpg 需要 server_hostname 保证 SSL 证书验证正确
