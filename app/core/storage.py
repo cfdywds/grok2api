@@ -643,6 +643,43 @@ class SQLStorage(BaseStorage):
     - 内置连接池 (QueuePool)
     """
 
+    @staticmethod
+    def _resolve_ipv4(url: str) -> tuple[str, str]:
+        """
+        将 URL 中的域名强制解析为 IPv4 地址
+        避免容器环境下 IPv6 路由不可达 (ENETUNREACH) 问题
+
+        Returns:
+            (modified_url, original_hostname) 解析失败时 original_hostname 为空
+        """
+        import socket
+        from urllib.parse import urlparse, urlunparse
+
+        try:
+            parsed = urlparse(url)
+            hostname = parsed.hostname
+            if not hostname:
+                return url, ""
+
+            # 已经是 IPv4 地址则跳过
+            try:
+                socket.inet_aton(hostname)
+                return url, ""
+            except OSError:
+                pass
+
+            ipv4_info = socket.getaddrinfo(hostname, None, socket.AF_INET)
+            if ipv4_info:
+                ipv4_addr = ipv4_info[0][4][0]
+                new_netloc = parsed.netloc.replace(hostname, ipv4_addr)
+                modified_url = urlunparse(parsed._replace(netloc=new_netloc))
+                logger.info(f"SQLStorage: Resolved {hostname} -> {ipv4_addr} (IPv4)")
+                return modified_url, hostname
+        except Exception as e:
+            logger.warning(f"SQLStorage: IPv4 resolution failed: {e}")
+
+        return url, ""
+
     def __init__(self, url: str):
         try:
             from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
@@ -653,6 +690,15 @@ class SQLStorage(BaseStorage):
 
         self.dialect = url.split(":", 1)[0].split("+", 1)[0].lower()
 
+        # 容器环境下强制 IPv4 解析，避免 IPv6 路由不可达
+        connect_args = {}
+        resolved_url, original_host = self._resolve_ipv4(url)
+        if original_host:
+            url = resolved_url
+            # asyncpg 需要 server_hostname 保证 SSL 证书验证正确
+            if self.dialect in ("postgres", "postgresql", "pgsql"):
+                connect_args["server_hostname"] = original_host
+
         # 配置 robust 的连接池
         self.engine = create_async_engine(
             url,
@@ -661,6 +707,7 @@ class SQLStorage(BaseStorage):
             max_overflow=10,
             pool_recycle=3600,
             pool_pre_ping=True,
+            connect_args=connect_args,
         )
         self.async_session = async_sessionmaker(self.engine, expire_on_commit=False)
         self._initialized = False
