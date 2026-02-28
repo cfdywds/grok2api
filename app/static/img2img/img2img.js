@@ -37,10 +37,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function initWorkspace() {
   if (!window.Workspace) return;
+  const banner = document.getElementById('workspace-banner');
   const handle = await Workspace.initWorkspace();
   if (!handle) {
-    const banner = document.getElementById('workspace-banner');
     if (banner) banner.style.display = 'flex';
+    return;
+  }
+  // handle 存在但权限可能需要重新授权（页面刷新后）
+  const perm = await handle.queryPermission({ mode: 'readwrite' });
+  if (perm !== 'granted') {
+    if (banner) {
+      banner.style.display = 'flex';
+      const btn = document.getElementById('workspace-banner-btn');
+      if (btn) btn.textContent = '重新授权目录';
+    }
   }
 }
 
@@ -60,7 +70,14 @@ function initEventListeners() {
   if (workspaceBannerBtn) {
     workspaceBannerBtn.addEventListener('click', async () => {
       try {
-        const handle = await Workspace.requestWorkspace();
+        // 先尝试对已存 handle 重新授权，避免重复选择目录
+        let handle;
+        const resumed = await Workspace.resumePermission();
+        if (resumed) {
+          handle = Workspace.getHandle();
+        } else {
+          handle = await Workspace.requestWorkspace();
+        }
         if (handle) {
           document.getElementById('workspace-banner').style.display = 'none';
           Toast.success(`工作目录已设置: ${handle.name}`);

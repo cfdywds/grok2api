@@ -288,38 +288,38 @@
       window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
     }
 
-    if (autoDownloadToggle && autoDownloadToggle.checked) {
+    // 始终保存到工作目录（不依赖"自动下载"开关）
+    if (useFileSystemAPI && directoryHandle) {
       const timestamp = Date.now();
       const seq = meta && meta.sequence ? meta.sequence : 'unknown';
       const ext = mime === 'image/png' ? 'png' : 'jpg';
       const filename = `imagine_${timestamp}_${seq}.${ext}`;
-
-      if (useFileSystemAPI && directoryHandle) {
-        saveToFileSystem(base64, filename).then(ok => {
-          if (ok) {
-            // 保存图片元数据到本地 JSON
-            const entry = {
-              id: `img_${timestamp}_${Math.random().toString(36).substr(2, 6)}`,
-              filename,
-              prompt: prompt || '',
-              model: (meta && meta.model) || 'grok-imagine-1.0',
-              aspect_ratio: ratioSelect ? ratioSelect.value : '1:1',
-              created_at: timestamp,
-              width: null,
-              height: null,
-              tags: [],
-              nsfw: false,
-              quality_score: null,
-              favorite: false,
-            };
-            Workspace.addImageMetadata(entry).catch(() => {});
-          }
-        }).catch(() => {
-          downloadImage(base64, filename);
-        });
-      } else {
-        downloadImage(base64, filename);
-      }
+      saveToFileSystem(base64, filename).then(ok => {
+        if (ok) {
+          const entry = {
+            id: `img_${timestamp}_${Math.random().toString(36).substr(2, 6)}`,
+            filename,
+            prompt: prompt || '',
+            model: (meta && meta.model) || 'grok-imagine-1.0',
+            aspect_ratio: ratioSelect ? ratioSelect.value : '1:1',
+            created_at: timestamp,
+            width: null,
+            height: null,
+            tags: [],
+            nsfw: false,
+            quality_score: null,
+            favorite: false,
+          };
+          Workspace.addImageMetadata(entry).catch(() => {});
+        }
+      }).catch(() => {});
+    } else if (autoDownloadToggle && autoDownloadToggle.checked) {
+      // 未设置工作目录时，退回浏览器下载
+      const timestamp = Date.now();
+      const seq = meta && meta.sequence ? meta.sequence : 'unknown';
+      const ext = mime === 'image/png' ? 'png' : 'jpg';
+      const filename = `imagine_${timestamp}_${seq}.${ext}`;
+      downloadImage(base64, filename);
     }
   }
 
@@ -1355,7 +1355,14 @@
   if (bannerBtn) {
     bannerBtn.addEventListener('click', async () => {
       try {
-        const h = await Workspace.requestWorkspace();
+        // 先尝试对已存 handle 重新授权，避免重复选择目录
+        let h = null;
+        const resumed = await Workspace.resumePermission();
+        if (resumed) {
+          h = Workspace.getHandle();
+        } else {
+          h = await Workspace.requestWorkspace();
+        }
         if (typeof window._imagineSetHandle === 'function') {
           window._imagineSetHandle(h);
         }
