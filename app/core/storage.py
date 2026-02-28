@@ -717,23 +717,16 @@ class SQLStorage(BaseStorage):
         self.dialect = url.split(":", 1)[0].split("+", 1)[0].lower()
 
         # 容器环境下优先 IPv4、回退 IPv6 解析，避免路由不可达
-        connect_args = {}
-        resolved_url, original_host = self._resolve_ip(url)
-        if original_host:
-            url = resolved_url
-            # asyncpg 需要 server_hostname 保证 SSL 证书验证正确
-            if self.dialect in ("postgres", "postgresql", "pgsql"):
-                connect_args["server_hostname"] = original_host
+        resolved_url, _ = self._resolve_ip(url)
 
         # 配置 robust 的连接池
         self.engine = create_async_engine(
-            url,
+            resolved_url,
             echo=False,
             pool_size=20,
             max_overflow=10,
             pool_recycle=3600,
             pool_pre_ping=True,
-            connect_args=connect_args,
         )
         self.async_session = async_sessionmaker(self.engine, expire_on_commit=False)
         self._initialized = False
