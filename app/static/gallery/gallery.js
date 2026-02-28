@@ -1819,7 +1819,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function setupWorkspace(skipPerm = false) {
         if (!window.Workspace) return false;
         if (!Workspace.isSupported()) {
-            if (banner) { banner.style.display = 'flex'; if (bannerMsg) bannerMsg.textContent = '⚠️ 浏览器不支持 File System API，请使用 Chrome/Edge。'; if (bannerBtn) bannerBtn.style.display = 'none'; }
+            const reason = (Workspace.getUnsupportedReason && Workspace.getUnsupportedReason()) || '浏览器不支持 File System API，请使用 Chrome/Edge';
+            if (banner) { banner.style.display = 'flex'; if (bannerMsg) bannerMsg.textContent = '⚠️ ' + reason; if (bannerBtn) bannerBtn.style.display = 'none'; }
             return false;
         }
         const handle = await Workspace.initWorkspace();

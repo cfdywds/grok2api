@@ -134,6 +134,18 @@ const _WS = (() => {
     return typeof window.showDirectoryPicker === 'function';
   }
 
+  /**
+   * 不支持时的原因说明（便于前端展示更准确的提示）
+   * @returns {string|null} 原因字符串，支持时返回 null
+   */
+  function getUnsupportedReason() {
+    if (typeof window.showDirectoryPicker === 'function') return null;
+    if (!window.isSecureContext) {
+      return '需要通过 http://localhost 或 https:// 访问，当前使用 IP 地址访问导致 File System Access API 不可用';
+    }
+    return '当前浏览器不支持 File System Access API，请使用 Chrome 或 Edge';
+  }
+
   // ── 元数据 I/O ────────────────────────────────────────────────────────────
 
   /**
@@ -268,6 +280,7 @@ const _WS = (() => {
     clearWorkspace,
     getHandle,
     isSupported,
+    getUnsupportedReason,
     readMetadata,
     writeMetadata,
     addImageMetadata,

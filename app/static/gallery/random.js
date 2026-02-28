@@ -56,7 +56,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (!Workspace.isSupported()) {
     if (banner) {
-      bannerMsg.textContent = '⚠️ 当前浏览器不支持 File System Access API，请使用 Chrome 或 Edge。';
+      const reason = (Workspace.getUnsupportedReason && Workspace.getUnsupportedReason()) || '当前浏览器不支持 File System Access API，请使用 Chrome 或 Edge';
+      bannerMsg.textContent = '⚠️ ' + reason;
       banner.style.display = 'flex';
     }
   } else {

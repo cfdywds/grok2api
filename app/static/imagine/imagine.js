@@ -1323,7 +1323,8 @@
   if (!Workspace.isSupported()) {
     showBanner();
     if (banner) {
-      banner.querySelector('span').textContent = '⚠️ 当前浏览器不支持 File System Access API，请使用 Chrome 或 Edge。';
+      const reason = (Workspace.getUnsupportedReason && Workspace.getUnsupportedReason()) || '当前浏览器不支持 File System Access API，请使用 Chrome 或 Edge';
+      banner.querySelector('span').textContent = '⚠️ ' + reason;
       if (bannerBtn) bannerBtn.style.display = 'none';
     }
     return;

@@ -106,6 +106,7 @@
         <li>服务端的数据<strong>不会被删除</strong>，迁移是只读拷贝操作</li>
         <li>如果目录已有 <code>image_metadata.json</code>，迁移会<strong>追加</strong>而非覆盖</li>
         <li>需要使用 Chrome 或 Edge 浏览器（Firefox 不支持 File System Access API）</li>
+        <li>必须通过 <code>http://localhost</code> 或 <code>https://</code> 访问，通过 IP 地址访问将导致 API 不可用</li>
       </ul>
     </div>
   </div>
