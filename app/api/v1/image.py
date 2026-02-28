@@ -4,12 +4,10 @@ Image Generation API 路由
 
 import asyncio
 import base64
-import hashlib
 import math
 import random
 import re
 import time
-import uuid
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -32,8 +30,6 @@ from app.services.token import get_token_manager, EffortType
 from app.core.exceptions import ValidationException, AppException, ErrorType
 from app.core.config import get_config
 from app.core.logger import logger
-from app.services.gallery import ImageMetadata
-from app.services.gallery.service import get_image_metadata_service
 
 
 router = APIRouter(tags=["Images"])
@@ -298,160 +294,6 @@ async def call_grok(
                 logger.warning(f"Failed to consume token: {e}")
 
 
-async def _save_image_metadata(
-    selected_images: List[str],
-    prompt: str,
-    model: str,
-    aspect_ratio: str,
-    response_format: str,
-):
-    """
-    异步保存图片元数据，并进行质量检测
-
-    Args:
-        selected_images: 生成的图片列表（base64 或 URL）
-        prompt: 提示词
-        model: 模型名称
-        aspect_ratio: 宽高比
-        response_format: 响应格式
-    """
-    try:
-        service = get_image_metadata_service()
-        image_dir = Path(__file__).parent.parent.parent.parent / "data" / "tmp" / "image"
-        image_dir.mkdir(parents=True, exist_ok=True)
-
-        # 导入 EXIF 管理器
-        from app.services.gallery.exif_manager import get_exif_manager
-        exif_manager = get_exif_manager()
-
-        for img_data in selected_images:
-            if img_data == "error" or not img_data:
-                continue
-
-            image_id = None
-            file_path = None
-
-            try:
-                # 保存图片文件
-                if response_format == "url":
-                    # URL 格式，跳过（已经保存在服务器上）
-                    continue
-                else:
-                    # base64 格式，解码
-                    image_bytes = base64.b64decode(img_data)
-
-                    # 计算内容哈希
-                    content_hash = hashlib.sha256(image_bytes).hexdigest()
-
-                    # 检查是否已存在相同内容的图片
-                    existing_image = await service.find_image_by_hash(content_hash)
-                    if existing_image:
-                        logger.info(f"图片内容已存在，跳过保存: {content_hash[:16]}...")
-                        continue
-
-                    # 生成唯一 ID
-                    image_id = str(uuid.uuid4())
-                    filename = f"{image_id}.jpg"
-                    file_path = image_dir / filename
-
-                    # 检查文件是否已存在（理论上不应该，但以防万一）
-                    if file_path.exists():
-                        logger.warning(f"文件已存在，跳过: {filename}")
-                        continue
-
-                    # 保存文件
-                    file_path.write_bytes(image_bytes)
-
-                # ✨ 关键：将提示词写入图片的 EXIF 数据
-                exif_manager.write_metadata_to_image(
-                    image_path=file_path,
-                    prompt=prompt,
-                    model=model,
-                    aspect_ratio=aspect_ratio,
-                    additional_metadata={
-                        "image_id": image_id,
-                        "created_at": int(time.time() * 1000)
-                    }
-                )
-
-                # 获取文件信息
-                file_size = file_path.stat().st_size if file_path.exists() else 0
-
-                # 解析宽高比
-                width, height = 1024, 1024
-                if aspect_ratio:
-                    try:
-                        w_str, h_str = aspect_ratio.split(":")
-                        ratio = int(w_str) / int(h_str)
-                        if ratio > 1:
-                            width = 1536
-                            height = int(1536 / ratio)
-                        elif ratio < 1:
-                            height = 1536
-                            width = int(1536 * ratio)
-                    except Exception:
-                        pass
-
-                # 创建元数据
-                metadata = ImageMetadata(
-                    id=image_id,
-                    filename=filename,
-                    prompt=prompt,
-                    model=model,
-                    aspect_ratio=aspect_ratio or "1:1",
-                    created_at=int(time.time() * 1000),
-                    file_size=file_size,
-                    width=width,
-                    height=height,
-                    tags=[],
-                    nsfw=False,
-                    metadata={"content_hash": content_hash},
-                )
-
-                # 保存元数据
-                await service.add_image(metadata)
-                logger.info(f"保存图片元数据成功: {image_id}")
-
-                # 质量检测：如果评分低于30分，自动删除
-                try:
-                    quality_result = await service.analyze_image_quality(image_id)
-                    if quality_result:
-                        quality_score = quality_result.get("quality_score", 100)
-                        quality_issues = quality_result.get("quality_issues", [])
-
-                        logger.info(f"图片质量评分: {quality_score:.2f}, 问题: {quality_issues}")
-
-                        # 评分低于30分，删除图片
-                        if quality_score < 30:
-                            logger.warning(f"图片质量过低 ({quality_score:.2f} < 30)，自动删除: {image_id}")
-
-                            # 删除图片和元数据
-                            await service.delete_images([image_id])
-                            logger.info(f"已删除低质量图片: {image_id}")
-                        else:
-                            # 更新质量元数据
-                            await service._update_quality_metadata(image_id, quality_result)
-                    else:
-                        logger.warning(f"质量检测失败，保留图片: {image_id}")
-
-                except Exception as e:
-                    # 质量检测失败不影响图片保存
-                    logger.warning(f"质量检测失败 {image_id}: {e}，保留图片")
-
-            except Exception as e:
-                logger.error(f"保存单张图片元数据失败: {e}")
-                # 清理可能残留的文件
-                if file_path and file_path.exists():
-                    try:
-                        file_path.unlink()
-                    except Exception:
-                        pass
-                continue
-
-    except Exception as e:
-        logger.error(f"保存图片元数据失败: {e}")
-
-
 @router.post("/images/generations")
 async def create_image(request: ImageGenerationRequest):
     """
@@ -644,15 +486,6 @@ async def create_image(request: ImageGenerationRequest):
         "output_tokens": 0,
         "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
     }
-
-    # 同步保存元数据（防止竞态条件）
-    await _save_image_metadata(
-        selected_images=selected_images,
-        prompt=request.prompt,
-        model=request.model,
-        aspect_ratio=resolve_aspect_ratio(request.size) if use_ws else "1:1",
-        response_format=response_format,
-    )
 
     return JSONResponse(
         content={
@@ -995,15 +828,6 @@ async def edit_image(
             selected_images.append("error")
 
     data = [{response_field: img} for img in selected_images]
-
-    # 异步保存元数据（图生图）
-    asyncio.create_task(_save_image_metadata(
-        selected_images=selected_images,
-        prompt=edit_request.prompt,
-        model=edit_request.model,
-        aspect_ratio=resolve_aspect_ratio(edit_request.size),
-        response_format=response_format,
-    ))
 
     try:
         await token_mgr.consume(token, _get_effort(model_info))

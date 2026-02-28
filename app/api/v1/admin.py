@@ -168,6 +168,12 @@ async def gallery_random_page():
     return await render_template("gallery/random.html")
 
 
+@router.get("/admin/gallery/migrate")
+async def gallery_migrate_page():
+    """历史数据迁移页面"""
+    return await render_template("gallery/migrate.html")
+
+
 @router.get("/admin/prompts", response_class=HTMLResponse, include_in_schema=False)
 async def prompts_page():
     """提示词管理页面"""

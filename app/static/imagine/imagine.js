@@ -293,9 +293,28 @@
       const seq = meta && meta.sequence ? meta.sequence : 'unknown';
       const ext = mime === 'image/png' ? 'png' : 'jpg';
       const filename = `imagine_${timestamp}_${seq}.${ext}`;
-      
+
       if (useFileSystemAPI && directoryHandle) {
-        saveToFileSystem(base64, filename).catch(() => {
+        saveToFileSystem(base64, filename).then(ok => {
+          if (ok) {
+            // 保存图片元数据到本地 JSON
+            const entry = {
+              id: `img_${timestamp}_${Math.random().toString(36).substr(2, 6)}`,
+              filename,
+              prompt: prompt || '',
+              model: (meta && meta.model) || 'grok-imagine-1.0',
+              aspect_ratio: ratioSelect ? ratioSelect.value : '1:1',
+              created_at: timestamp,
+              width: null,
+              height: null,
+              tags: [],
+              nsfw: false,
+              quality_score: null,
+              favorite: false,
+            };
+            Workspace.addImageMetadata(entry).catch(() => {});
+          }
+        }).catch(() => {
           downloadImage(base64, filename);
         });
       } else {
@@ -659,15 +678,15 @@
       selectFolderBtn.disabled = false;
       selectFolderBtn.addEventListener('click', async () => {
         try {
-          directoryHandle = await window.showDirectoryPicker({
-            mode: 'readwrite'
-          });
+          const handle = await Workspace.requestWorkspace();
+          directoryHandle = handle;
           useFileSystemAPI = true;
           if (folderPath) {
-            folderPath.textContent = directoryHandle.name;
+            folderPath.textContent = handle.name;
             selectFolderBtn.style.color = '#059669';
           }
-          toast('已选择文件夹: ' + directoryHandle.name, 'success');
+          hideBanner();
+          toast('已选择文件夹: ' + handle.name, 'success');
         } catch (e) {
           if (e.name !== 'AbortError') {
             toast('选择文件夹失败', 'error');
@@ -992,8 +1011,7 @@
   }
 
   // Make floating actions draggable
-  const floatingActions = document.getElementById('floatingActions');
-  if (floatingActions) {
+  const floatingActions = document.getElementById('floatingActions');  if (floatingActions) {
     let isDragging = false;
     let startX, startY, initialLeft, initialTop;
     
@@ -1041,6 +1059,12 @@
       }
     });
   }
+
+  // 暴露 handle 设置接口，供工作区初始化代码使用
+  window._imagineSetHandle = function (handle) {
+    directoryHandle = handle;
+    useFileSystemAPI = true;
+  };
 })();
 
 // Prompt optimization functionality
@@ -1273,6 +1297,74 @@
         // 如果当前显示的优化结果与输入框内容不同，则隐藏
         if (promptInput.value.trim() !== currentOptimizedPrompt) {
           hideOptimizedPromptInline();
+        }
+      }
+    });
+  }
+})();
+
+// 工作区初始化
+(async () => {
+  if (typeof Workspace === 'undefined') return;
+
+  const banner = document.getElementById('workspace-banner');
+  const bannerBtn = document.getElementById('workspace-banner-btn');
+  const selectFolderBtn = document.getElementById('selectFolderBtn');
+  const folderPath = document.getElementById('folderPath');
+
+  function showBanner() {
+    if (banner) banner.style.display = 'flex';
+  }
+
+  window.hideBanner = function () {
+    if (banner) banner.style.display = 'none';
+  };
+
+  if (!Workspace.isSupported()) {
+    showBanner();
+    if (banner) {
+      banner.querySelector('span').textContent = '⚠️ 当前浏览器不支持 File System Access API，请使用 Chrome 或 Edge。';
+      if (bannerBtn) bannerBtn.style.display = 'none';
+    }
+    return;
+  }
+
+  // 尝试从 IndexedDB 恢复
+  const handle = await Workspace.initWorkspace();
+  if (handle) {
+    // 尝试自动获取权限（需用户手势才能静默成功）
+    const perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm === 'granted') {
+      // 更新 imagine.js 内部变量（通过全局引用）
+      if (typeof window._imagineSetHandle === 'function') {
+        window._imagineSetHandle(handle);
+      }
+      if (folderPath) folderPath.textContent = handle.name;
+      if (selectFolderBtn) selectFolderBtn.style.color = '#059669';
+      window.hideBanner();
+    } else {
+      // 有 handle 但需要重新授权
+      showBanner();
+      if (bannerBtn) bannerBtn.textContent = '重新授权目录';
+    }
+  } else {
+    showBanner();
+  }
+
+  if (bannerBtn) {
+    bannerBtn.addEventListener('click', async () => {
+      try {
+        const h = await Workspace.requestWorkspace();
+        if (typeof window._imagineSetHandle === 'function') {
+          window._imagineSetHandle(h);
+        }
+        if (folderPath) folderPath.textContent = h.name;
+        if (selectFolderBtn) selectFolderBtn.style.color = '#059669';
+        window.hideBanner();
+        if (typeof showToast === 'function') showToast('工作目录已设置: ' + h.name, 'success');
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          if (typeof showToast === 'function') showToast('设置工作目录失败', 'error');
         }
       }
     });

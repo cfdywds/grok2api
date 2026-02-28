@@ -3,11 +3,12 @@
 """
 
 import io
+import json
 import zipfile
 import random
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from app.core.logger import logger
@@ -311,6 +312,58 @@ async def get_random_image(
     except Exception as e:
         logger.error(f"获取随机图片失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取随机图片失败: {str(e)}")
+
+
+@router.get("/migrate")
+async def get_migration_info():
+    """获取服务端历史数据迁移信息"""
+    try:
+        service = get_image_metadata_service()
+        stats = await service.get_stats()
+        return {
+            "success": True,
+            "data": {
+                "total": stats.total_count,
+                "has_image_dir": service.image_dir.exists() if hasattr(service, "image_dir") else False,
+            },
+        }
+    except Exception as e:
+        logger.error(f"获取迁移信息失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/images/{image_id}/file")
+async def get_image_file(image_id: str):
+    """返回图片原始字节（用于迁移）"""
+    try:
+        service = get_image_metadata_service()
+        image = await service.get_image(image_id)
+        if not image:
+            raise HTTPException(status_code=404, detail="图片不存在")
+
+        file_path = service.image_dir / image.filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="图片文件不存在于服务器")
+
+        def _iter():
+            with open(file_path, "rb") as f:
+                while chunk := f.read(65536):
+                    yield chunk
+
+        return StreamingResponse(
+            _iter(),
+            media_type="image/jpeg",
+            headers={
+                "Content-Disposition": f'inline; filename="{image.filename}"',
+                "Cache-Control": "max-age=3600",
+                "Content-Length": str(file_path.stat().st_size),
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取图片文件失败 {image_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/images/{image_id}")

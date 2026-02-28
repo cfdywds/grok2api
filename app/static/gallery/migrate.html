@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>历史数据迁移 - Grok2API</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/common/common.css">
+  <style>
+    body { background: var(--bg, #f9fafb); font-family: system-ui, sans-serif; }
+    .container { max-width: 720px; margin: 0 auto; padding: 32px 16px; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 16px; }
+    .step { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+    .step-num { flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: #3b82f6; color: #fff; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+    .step-num.done { background: #10b981; }
+    .step-num.error { background: #ef4444; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; border: none; transition: opacity .15s; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-primary { background: #3b82f6; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #2563eb; }
+    .btn-success { background: #10b981; color: #fff; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-outline { background: transparent; border: 1px solid #d1d5db; color: #374151; }
+    .btn-outline:hover:not(:disabled) { background: #f3f4f6; }
+    .progress-wrap { background: #e5e7eb; border-radius: 999px; height: 10px; overflow: hidden; margin: 8px 0; }
+    .progress-bar { height: 100%; background: #3b82f6; border-radius: 999px; transition: width .3s; }
+    .log { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; height: 180px; overflow-y: auto; font-size: 12px; font-family: monospace; color: #374151; }
+    .log-line { margin-bottom: 2px; }
+    .log-line.ok { color: #10b981; }
+    .log-line.err { color: #ef4444; }
+    .log-line.warn { color: #f59e0b; }
+    .stat-row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .stat-box { flex: 1; min-width: 120px; background: #f1f5f9; border-radius: 8px; padding: 12px 16px; }
+    .stat-box .num { font-size: 24px; font-weight: 700; color: #1e293b; }
+    .stat-box .label { font-size: 12px; color: #64748b; margin-top: 2px; }
+    #workspace-status { font-size: 13px; color: #64748b; }
+    #workspace-status.ok { color: #10b981; }
+  </style>
+</head>
+<body>
+  <div id="header-container"></div>
+
+  <div class="container">
+    <h1 style="font-size:22px;font-weight:700;margin-bottom:4px;">历史数据迁移</h1>
+    <p style="color:#64748b;font-size:14px;margin-bottom:24px;">将服务端 <code>./data/tmp/image</code> 中的图片和元数据迁移到本地工作目录</p>
+
+    <!-- 服务端状态 -->
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:12px;">📊 服务端数据</div>
+      <div class="stat-row">
+        <div class="stat-box">
+          <div class="num" id="stat-total">-</div>
+          <div class="label">服务端图片总数</div>
+        </div>
+        <div class="stat-box">
+          <div class="num" id="stat-migrated">0</div>
+          <div class="label">已迁移</div>
+        </div>
+        <div class="stat-box">
+          <div class="num" id="stat-failed">0</div>
+          <div class="label">失败</div>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <span id="server-status" style="font-size:13px;color:#64748b;">正在加载服务端信息...</span>
+      </div>
+    </div>
+
+    <!-- 工作目录 -->
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:12px;">📁 本地工作目录</div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <button class="btn btn-outline" id="select-workspace-btn">选择工作目录</button>
+        <span id="workspace-status">未设置</span>
+      </div>
+      <p style="margin-top:8px;font-size:12px;color:#94a3b8;">
+        ⚠️ 建议选择一个空目录或专用目录，迁移将在此目录下创建图片文件和 <code>image_metadata.json</code>
+      </p>
+    </div>
+
+    <!-- 迁移进度 -->
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:12px;">🚀 迁移进度</div>
+      <div class="progress-wrap">
+        <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#64748b;margin-bottom:12px;">
+        <span id="progress-text">0 / 0</span>
+        <span id="progress-pct">0%</span>
+      </div>
+      <div class="log" id="log"></div>
+      <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
+        <button class="btn btn-primary" id="start-btn" disabled>开始迁移</button>
+        <button class="btn btn-danger" id="stop-btn" style="display:none;">停止</button>
+        <button class="btn btn-outline" id="refresh-btn">刷新服务端信息</button>
+      </div>
+    </div>
+
+    <!-- 说明 -->
+    <div class="card" style="background:#fffbeb;border-color:#fde68a;">
+      <div style="font-weight:600;margin-bottom:8px;color:#92400e;">📝 迁移说明</div>
+      <ul style="font-size:13px;color:#78350f;line-height:1.8;padding-left:16px;">
+        <li>迁移会从服务端逐张下载图片并保存到你选择的本地目录</li>
+        <li>同时生成 <code>image_metadata.json</code>，包含所有提示词、评分、标签、收藏等信息</li>
+        <li>迁移完成后，在图库/随机查看页面选择该目录即可浏览历史图片</li>
+        <li>服务端的数据<strong>不会被删除</strong>，迁移是只读拷贝操作</li>
+        <li>如果目录已有 <code>image_metadata.json</code>，迁移会<strong>追加</strong>而非覆盖</li>
+        <li>需要使用 Chrome 或 Edge 浏览器（Firefox 不支持 File System Access API）</li>
+      </ul>
+    </div>
+  </div>
+
+  <script src="/static/common/workspace.js"></script>
+  <script src="/static/gallery/migrate.js"></script>
+  <script>
+    fetch('/static/common/header.html')
+      .then(r => r.text())
+      .then(html => { document.getElementById('header-container').innerHTML = html; });
+  </script>
+</body>
+</html>

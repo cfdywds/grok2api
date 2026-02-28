@@ -30,10 +30,8 @@ from app.api.v1.image import router as image_router  # noqa: E402
 from app.api.v1.files import router as files_router  # noqa: E402
 from app.api.v1.models import router as models_router  # noqa: E402
 from app.api.v1.gallery import router as gallery_router  # noqa: E402
-from app.api.v1.gallery_backup import router as gallery_backup_router  # noqa: E402
 from app.api.v1.prompt import router as prompt_router  # noqa: E402
 from app.api.v1.prompts import router as prompts_router  # noqa: E402
-from app.api.v1.qrcode import router as qrcode_router  # noqa: E402
 from app.services.token import get_scheduler  # noqa: E402
 
 
@@ -122,9 +120,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(files_router, prefix="/v1/files")
     app.include_router(gallery_router)
-    app.include_router(gallery_backup_router, prefix="/api/v1/gallery")
     app.include_router(prompts_router)
-    app.include_router(qrcode_router)  # 二维码路由
 
     # 静态文件服务
     from fastapi.staticfiles import StaticFiles
@@ -132,11 +128,6 @@ def create_app() -> FastAPI:
     static_dir = Path(__file__).parent / "app" / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-    # 图片文件服务
-    image_dir = Path(__file__).parent / "data" / "tmp" / "image"
-    if image_dir.exists():
-        app.mount("/data/tmp/image", StaticFiles(directory=image_dir), name="images")
 
     # 注册管理路由
     from app.api.v1.admin import router as admin_router

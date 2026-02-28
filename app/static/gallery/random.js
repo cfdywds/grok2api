@@ -3,8 +3,10 @@
 // 状态管理
 const state = {
   currentImage: null,
+  currentObjectURL: null,
   viewedIds: [],
   minQualityScore: 40,
+  allImages: [],
 };
 
 // DOM 元素
@@ -28,7 +30,7 @@ const elements = {
 };
 
 // 初始化
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   // 获取 DOM 元素
   elements.loadingState = document.getElementById('loading-state');
   elements.imageContainer = document.getElementById('image-container');
@@ -47,10 +49,47 @@ document.addEventListener('DOMContentLoaded', () => {
   elements.downloadBtnMobile = document.getElementById('download-btn-mobile');
   elements.resetBtn = document.getElementById('reset-btn');
 
+  // 工作目录初始化
+  const banner = document.getElementById('workspace-banner');
+  const bannerMsg = document.getElementById('workspace-banner-msg');
+  const bannerBtn = document.getElementById('workspace-banner-btn');
+
+  if (!Workspace.isSupported()) {
+    if (banner) {
+      bannerMsg.textContent = '⚠️ 当前浏览器不支持 File System Access API，请使用 Chrome 或 Edge。';
+      banner.style.display = 'flex';
+    }
+  } else {
+    const handle = await Workspace.initWorkspace();
+    if (!handle) {
+      if (banner) banner.style.display = 'flex';
+    } else {
+      const perm = await handle.queryPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') {
+        if (banner) {
+          bannerMsg.textContent = '📁 工作目录权限已失效，请重新授权。';
+          bannerBtn.textContent = '重新授权';
+          banner.style.display = 'flex';
+        }
+      }
+    }
+  }
+
+  if (bannerBtn) {
+    bannerBtn.addEventListener('click', async () => {
+      const ok = await Workspace.resumePermission().catch(() => false)
+        || await Workspace.requestWorkspace().then(() => true).catch(() => false);
+      if (ok && banner) banner.style.display = 'none';
+      await loadImagePool();
+      loadRandomImage();
+    });
+  }
+
   // 绑定事件
   bindEvents();
 
-  // 加载第一张随机图片
+  // 加载图片池并显示第一张
+  await loadImagePool();
   loadRandomImage();
 });
 
@@ -155,10 +194,22 @@ function handleKeyDown(e) {
   }
 }
 
+// 加载图片池（从本地 metadata）
+async function loadImagePool() {
+  try {
+    const data = await Workspace.readMetadata();
+    state.allImages = (data.images || []).filter(
+      img => img.filename && (img.quality_score == null || img.quality_score >= state.minQualityScore)
+    );
+  } catch (e) {
+    state.allImages = [];
+  }
+}
+
 // 加载随机图片
 async function loadRandomImage(direction = null) {
   try {
-    // 添加退出动画
+    // 退出动画
     if (state.currentImage && direction) {
       elements.mainImage.classList.add(direction === 'left' ? 'slide-left' : 'slide-right');
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -166,26 +217,19 @@ async function loadRandomImage(direction = null) {
 
     showLoading();
 
-    // 构建排除 ID 列表
-    const excludeIds = state.viewedIds.join(',');
+    // 从图片池筛选未浏览的图片
+    const candidates = state.allImages.filter(img => !state.viewedIds.includes(img.id));
 
-    // 调用 API
-    const response = await fetch(
-      `/api/v1/admin/gallery/images/random?exclude_ids=${excludeIds}&min_quality_score=${state.minQualityScore}`
-    );
-
-    const result = await response.json();
-
-    if (!result.success || !result.data) {
+    if (candidates.length === 0) {
       showEmpty();
       return;
     }
 
-    // 更新状态
-    state.currentImage = result.data;
-    state.viewedIds.push(result.data.id);
+    // 随机选取一张
+    const img = candidates[Math.floor(Math.random() * candidates.length)];
+    state.currentImage = img;
+    state.viewedIds.push(img.id);
 
-    // 显示图片
     showImage();
   } catch (error) {
     console.error('加载随机图片失败:', error);
@@ -202,17 +246,30 @@ function showLoading() {
 }
 
 // 显示图片
-function showImage() {
+async function showImage() {
   const img = state.currentImage;
+
+  // 释放上一张的 ObjectURL
+  if (state.currentObjectURL) {
+    URL.revokeObjectURL(state.currentObjectURL);
+    state.currentObjectURL = null;
+  }
 
   // 移除旧的动画类
   elements.mainImage.classList.remove('slide-left', 'slide-right', 'fade-in');
 
-  // 设置图片
-  elements.mainImage.src = `/data/tmp/image/${img.filename}`;
-  elements.mainImage.alt = img.prompt;
+  // 从工作目录获取 ObjectURL
+  const objectURL = await Workspace.getImageURL(img.filename);
+  if (!objectURL) {
+    showToast('图片文件不存在于工作目录', 'error');
+    showEmpty();
+    return;
+  }
+  state.currentObjectURL = objectURL;
+  elements.mainImage.src = objectURL;
+  elements.mainImage.alt = img.prompt || '';
 
-  // 添加进入动画
+  // 进入动画
   setTimeout(() => {
     elements.mainImage.classList.add('fade-in');
   }, 50);
@@ -304,24 +361,13 @@ async function handleFavoriteClick() {
   const newFavoriteState = !state.currentImage.favorite;
 
   try {
-    const response = await fetch(
-      `/api/v1/admin/gallery/images/${state.currentImage.id}/favorite`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ favorite: newFavoriteState }),
-      }
-    );
-
-    const result = await response.json();
-
-    if (result.success) {
-      state.currentImage.favorite = newFavoriteState;
-      updateFavoriteButton(newFavoriteState);
-      showToast(newFavoriteState ? '已收藏' : '已取消收藏', 'success');
-    } else {
-      showToast('操作失败', 'error');
-    }
+    await Workspace.updateImageMetadata(state.currentImage.id, { favorite: newFavoriteState });
+    state.currentImage.favorite = newFavoriteState;
+    // 同步图片池中的状态
+    const poolImg = state.allImages.find(img => img.id === state.currentImage.id);
+    if (poolImg) poolImg.favorite = newFavoriteState;
+    updateFavoriteButton(newFavoriteState);
+    showToast(newFavoriteState ? '已收藏' : '已取消收藏', 'success');
   } catch (error) {
     console.error('切换收藏状态失败:', error);
     showToast('操作失败', 'error');
@@ -332,32 +378,29 @@ async function handleFavoriteClick() {
 async function handleDeleteClick() {
   if (!state.currentImage) return;
 
-  // 使用自定义确认对话框
   const confirmed = await showConfirm(
     '确认删除',
     '确定要删除这张图片吗？此操作不可恢复。'
   );
 
-  if (!confirmed) {
-    return;
-  }
+  if (!confirmed) return;
 
   try {
-    const response = await fetch('/api/v1/admin/gallery/images/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_ids: [state.currentImage.id] }),
-    });
+    const { id, filename } = state.currentImage;
+    await Workspace.removeImageMetadata(id);
+    await Workspace.deleteImage(filename);
 
-    const result = await response.json();
-
-    if (result.success) {
-      showToast('删除成功', 'success');
-      // 加载下一张
-      loadRandomImage('right');
-    } else {
-      showToast('删除失败', 'error');
+    // 释放 ObjectURL
+    if (state.currentObjectURL) {
+      URL.revokeObjectURL(state.currentObjectURL);
+      state.currentObjectURL = null;
     }
+
+    // 从图片池移除
+    state.allImages = state.allImages.filter(img => img.id !== id);
+
+    showToast('删除成功', 'success');
+    loadRandomImage('right');
   } catch (error) {
     console.error('删除图片失败:', error);
     showToast('删除失败', 'error');
@@ -365,11 +408,19 @@ async function handleDeleteClick() {
 }
 
 // 处理下载点击
-function handleDownloadClick() {
+async function handleDownloadClick() {
   if (!state.currentImage) return;
 
+  const objectURL = state.currentObjectURL
+    || await Workspace.getImageURL(state.currentImage.filename);
+
+  if (!objectURL) {
+    showToast('图片文件不存在', 'error');
+    return;
+  }
+
   const link = document.createElement('a');
-  link.href = `/data/tmp/image/${state.currentImage.filename}`;
+  link.href = objectURL;
   link.download = state.currentImage.filename;
   link.click();
 
@@ -381,8 +432,6 @@ function handleResetClick() {
   state.viewedIds = [];
   loadRandomImage();
 }
-
-// 显示 Toast 通知
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
 

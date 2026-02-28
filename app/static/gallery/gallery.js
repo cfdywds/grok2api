@@ -1,5 +1,20 @@
 // 图片管理 JavaScript
 
+// 工作区初始化（在 DOMContentLoaded 之前异步执行）
+let _workspaceReady = false;
+(async () => {
+    if (typeof Workspace === 'undefined') return;
+    if (!Workspace.isSupported()) return;
+
+    const handle = await Workspace.initWorkspace();
+    if (handle) {
+        const perm = await handle.queryPermission({ mode: 'readwrite' });
+        if (perm === 'granted') {
+            _workspaceReady = true;
+        }
+    }
+})();
+
 // 从 localStorage 读取用户偏好
 function loadUserPreferences() {
     const savedPageSize = localStorage.getItem('gallery_page_size');
@@ -44,12 +59,10 @@ const state = {
     currentImageIndex: -1,
     analysisState: {
         mode: 'all',
-        maxWorkers: 8
+        maxWorkers: 8,
+        stopped: false,
     },
 };
-
-// API 基础路径
-const API_BASE = '/api/v1/admin/gallery';
 
 // Toast 通知系统
 const Toast = {
@@ -203,41 +216,73 @@ function formatDate(timestamp) {
 // API 调用
 async function fetchStats() {
     try {
-        const response = await fetch(`${API_BASE}/stats`);
-        const data = await response.json();
-        updateStats(data);
-    } catch (error) {
-        console.error('获取统计信息失败:', error);
+        if (!window.Workspace || !Workspace.getHandle()) return;
+        const meta = await Workspace.readMetadata();
+        const images = meta.images || [];
+
+        const total = images.length;
+        const totalSize = images.reduce((s, img) => s + (img.file_size || 0), 0);
+        const now = Date.now();
+        const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+        const monthCount = images.filter(img => img.created_at && img.created_at > monthAgo).length;
+
+        const tagCounts = {};
+        images.forEach(img => (img.tags || []).forEach(t => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
+        const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([tag]) => tag);
+
+        document.getElementById('stat-total').textContent = total;
+        document.getElementById('stat-size').textContent = formatFileSize(totalSize);
+        document.getElementById('stat-month').textContent = monthCount;
+        document.getElementById('stat-tags').textContent = topTags.join(', ') || '-';
+    } catch (e) {
+        console.warn('fetchStats error', e);
     }
 }
 
 async function fetchImages() {
     showLoading();
     try {
-        const params = new URLSearchParams({
-            page: state.currentPage,
-            page_size: state.pageSize,
-            sort_by: state.filters.sortBy,
-            sort_order: state.filters.sortOrder,
+        if (!window.Workspace || !Workspace.getHandle()) {
+            state.images = [];
+            state.total = 0;
+            state.totalPages = 0;
+            showEmpty();
+            return;
+        }
+
+        const meta = await Workspace.readMetadata();
+        let images = meta.images || [];
+
+        // 本地筛选
+        const { search, model, aspectRatio, sortBy, sortOrder, minQualityScore, maxQualityScore, hasQualityIssues, favorite } = state.filters;
+        if (search) {
+            const kw = search.toLowerCase();
+            images = images.filter(img => (img.prompt || '').toLowerCase().includes(kw));
+        }
+        if (model) images = images.filter(img => img.model === model);
+        if (aspectRatio) images = images.filter(img => img.aspect_ratio === aspectRatio);
+        if (minQualityScore !== null) images = images.filter(img => img.quality_score !== null && img.quality_score >= minQualityScore);
+        if (maxQualityScore !== null) images = images.filter(img => img.quality_score !== null && img.quality_score <= maxQualityScore);
+        if (hasQualityIssues !== null) images = images.filter(img => hasQualityIssues ? (img.quality_issues && img.quality_issues.length > 0) : (!img.quality_issues || img.quality_issues.length === 0));
+        if (favorite !== null) images = images.filter(img => img.favorite === favorite);
+
+        // 本地排序
+        images.sort((a, b) => {
+            const va = a[sortBy] || 0;
+            const vb = b[sortBy] || 0;
+            return sortOrder === 'desc' ? (vb > va ? 1 : -1) : (va > vb ? 1 : -1);
         });
 
-        if (state.filters.search) params.append('search', state.filters.search);
-        if (state.filters.model) params.append('model', state.filters.model);
-        if (state.filters.aspectRatio) params.append('aspect_ratio', state.filters.aspectRatio);
-        if (state.filters.minQualityScore !== null) params.append('min_quality_score', state.filters.minQualityScore);
-        if (state.filters.maxQualityScore !== null) params.append('max_quality_score', state.filters.maxQualityScore);
-        if (state.filters.hasQualityIssues !== null) params.append('has_quality_issues', state.filters.hasQualityIssues);
-        if (state.filters.favorite !== null) params.append('favorite', state.filters.favorite);
-
-        const response = await fetch(`${API_BASE}/images?${params}`);
-        const data = await response.json();
-
-        state.images = Array.isArray(data.images) ? data.images : [];
-        state.total = data.total || 0;
-        state.totalPages = data.total_pages || 0;
+        // 本地分页
+        state.total = images.length;
+        state.totalPages = Math.max(1, Math.ceil(images.length / state.pageSize));
+        if (state.currentPage > state.totalPages) state.currentPage = state.totalPages;
+        const start = (state.currentPage - 1) * state.pageSize;
+        state.images = images.slice(start, start + state.pageSize);
 
         renderImages();
         updatePagination();
+        await fetchStats();
     } catch (error) {
         console.error('获取图片列表失败:', error);
         state.images = [];
@@ -249,9 +294,9 @@ async function fetchImages() {
 
 async function fetchImageDetail(imageId) {
     try {
-        const response = await fetch(`${API_BASE}/images/${imageId}`);
-        const data = await response.json();
-        return data;
+        if (!window.Workspace || !Workspace.getHandle()) return null;
+        const meta = await Workspace.readMetadata();
+        return (meta.images || []).find(img => img.id === imageId) || null;
     } catch (error) {
         console.error('获取图片详情失败:', error);
         return null;
@@ -260,13 +305,12 @@ async function fetchImageDetail(imageId) {
 
 async function deleteImages(imageIds) {
     try {
-        const response = await fetch(`${API_BASE}/images/delete`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image_ids: imageIds }),
-        });
-        const data = await response.json();
-        return data;
+        if (!window.Workspace || !Workspace.getHandle()) return null;
+        const meta = await Workspace.readMetadata();
+        const toDelete = new Set(imageIds);
+        meta.images = (meta.images || []).filter(img => !toDelete.has(img.id));
+        await Workspace.writeMetadata(meta);
+        return { success: true };
     } catch (error) {
         console.error('删除图片失败:', error);
         return null;
@@ -275,13 +319,9 @@ async function deleteImages(imageIds) {
 
 async function updateTags(imageId, tags) {
     try {
-        const response = await fetch(`${API_BASE}/images/${imageId}/tags`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tags }),
-        });
-        const data = await response.json();
-        return data;
+        if (!window.Workspace) return null;
+        await Workspace.updateImageMetadata(imageId, { tags });
+        return { success: true };
     } catch (error) {
         console.error('更新标签失败:', error);
         return null;
@@ -289,16 +329,40 @@ async function updateTags(imageId, tags) {
 }
 
 async function exportImages(imageIds) {
+    if (!Workspace.getHandle()) {
+        Toast.warning('请先设置工作目录');
+        return;
+    }
     try {
-        const response = await fetch(`${API_BASE}/images/export`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image_ids: imageIds }),
-        });
+        showLoading();
+        const data = await Workspace.readMetadata();
+        const images = (data.images || []).filter(img => imageIds.includes(img.id));
 
-        if (!response.ok) throw new Error('导出失败');
+        if (typeof JSZip === 'undefined') {
+            // JSZip 未加载时，逐个下载
+            for (const img of images) {
+                const url = await Workspace.getImageURL(img.filename);
+                if (!url) continue;
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = img.filename;
+                a.click();
+                await new Promise(resolve => setTimeout(resolve, 200));
+                URL.revokeObjectURL(url);
+            }
+            Toast.success(`已下载 ${images.length} 张图片`);
+            return;
+        }
 
-        const blob = await response.blob();
+        const dirHandle = Workspace.getHandle();
+        const zip = new JSZip();
+        for (const img of images) {
+            const fh = await dirHandle.getFileHandle(img.filename);
+            const file = await fh.getFile();
+            zip.file(img.filename, file);
+        }
+
+        const blob = await zip.generateAsync({ type: 'blob' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -312,24 +376,52 @@ async function exportImages(imageIds) {
     } catch (error) {
         console.error('导出图片失败:', error);
         Toast.error('导出失败，请重试');
+    } finally {
+        hideLoading();
     }
 }
 
 async function scanLocalImages() {
+    const handle = Workspace.getHandle();
+    if (!handle) {
+        Toast.warning('请先设置工作目录');
+        return;
+    }
     try {
         showLoading();
-        const response = await fetch(`${API_BASE}/scan`, {
-            method: 'POST',
-        });
-        const data = await response.json();
+        const data = await Workspace.readMetadata();
+        const existingFilenames = new Set((data.images || []).map(img => img.filename));
 
-        if (data.success) {
-            Toast.success(data.message);
-            fetchImages();
-            fetchStats();
-        } else {
-            Toast.error('扫描失败，请重试');
+        const newEntries = [];
+        for await (const [name, fileHandle] of handle.entries()) {
+            if (fileHandle.kind !== 'file') continue;
+            if (!/\.(jpe?g|png|webp|gif)$/i.test(name)) continue;
+            if (existingFilenames.has(name)) continue;
+
+            const file = await fileHandle.getFile();
+            newEntries.push({
+                id: `import_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                filename: name,
+                prompt: '',
+                model: 'local-import',
+                aspect_ratio: '',
+                created_at: file.lastModified,
+                file_size: file.size,
+                tags: [],
+                favorite: false,
+            });
         }
+
+        if (newEntries.length > 0) {
+            data.images = [...newEntries, ...(data.images || [])];
+            await Workspace.writeMetadata(data);
+            Toast.success(`发现并导入 ${newEntries.length} 张新图片`);
+        } else {
+            Toast.info('没有发现新图片，元数据已是最新');
+        }
+
+        fetchImages();
+        fetchStats();
     } catch (error) {
         console.error('扫描本地图片失败:', error);
         Toast.error('扫描失败，请重试');
@@ -339,59 +431,60 @@ async function scanLocalImages() {
 }
 
 async function checkMissingFiles() {
+    const handle = Workspace.getHandle();
+    if (!handle) {
+        Toast.warning('请先设置工作目录');
+        return;
+    }
     try {
-        // 显示弹窗
         const modal = document.getElementById('missing-files-modal');
         modal.style.display = 'flex';
-
-        // 显示加载状态
         document.getElementById('missing-summary').innerHTML = '<p>正在检查失效图片...</p>';
         document.getElementById('missing-list-container').style.display = 'none';
 
-        const response = await fetch(`${API_BASE}/check-missing`);
-        const data = await response.json();
+        const data = await Workspace.readMetadata();
+        const images = data.images || [];
+        const missingImages = [];
 
-        if (data.success) {
-            const result = data.data;
-            const summary = document.getElementById('missing-summary');
+        for (const img of images) {
+            const exists = await Workspace.fileExists(img.filename);
+            if (!exists) missingImages.push(img);
+        }
 
-            if (result.missing === 0) {
-                summary.innerHTML = `
-                    <p style="color: #4caf50; font-weight: bold;">✓ 所有图片文件都存在</p>
-                    <p>总计: ${result.total} 张，有效: ${result.valid} 张</p>
-                `;
-            } else {
-                summary.innerHTML = `
-                    <p style="color: #ff9800; font-weight: bold;">⚠ 发现 ${result.missing} 张失效图片</p>
-                    <p>总计: ${result.total} 张，有效: ${result.valid} 张，失效: ${result.missing} 张</p>
-                    <p style="color: #666; font-size: 14px;">这些图片的文件已被删除，但元数据还保留着（包括提示词、评分等）</p>
-                `;
+        const total = images.length;
+        const missing = missingImages.length;
+        const valid = total - missing;
+        const summary = document.getElementById('missing-summary');
 
-                // 显示失效图片列表
-                const listContainer = document.getElementById('missing-list-container');
-                const list = document.getElementById('missing-files-list');
-                list.innerHTML = '';
-
-                result.missing_images.forEach(img => {
-                    const row = document.createElement('tr');
-                    row.style.borderBottom = '1px solid #eee';
-                    row.innerHTML = `
-                        <td style="padding: 8px; font-family: monospace; font-size: 12px;">${escapeHtml(img.filename)}</td>
-                        <td style="padding: 8px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(img.prompt || '-')}</td>
-                        <td style="padding: 8px; text-align: center;">${img.quality_score !== null ? img.quality_score.toFixed(0) : '-'}</td>
-                    `;
-                    list.appendChild(row);
-                });
-
-                listContainer.style.display = 'block';
-
-                // 保存失效图片ID列表，供删除使用
-                window.missingImageIds = result.missing_images.map(img => img.id);
-            }
-
-            Toast.success(data.message);
+        if (missing === 0) {
+            summary.innerHTML = `
+                <p style="color: #4caf50; font-weight: bold;">✓ 所有图片文件都存在</p>
+                <p>总计: ${total} 张，有效: ${valid} 张</p>
+            `;
         } else {
-            Toast.error('检查失败，请重试');
+            summary.innerHTML = `
+                <p style="color: #ff9800; font-weight: bold;">⚠ 发现 ${missing} 张失效图片</p>
+                <p>总计: ${total} 张，有效: ${valid} 张，失效: ${missing} 张</p>
+                <p style="color: #666; font-size: 14px;">这些图片的文件已从工作目录删除，但元数据仍保留</p>
+            `;
+
+            const listContainer = document.getElementById('missing-list-container');
+            const list = document.getElementById('missing-files-list');
+            list.innerHTML = '';
+
+            missingImages.forEach(img => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #eee';
+                row.innerHTML = `
+                    <td style="padding: 8px; font-family: monospace; font-size: 12px;">${escapeHtml(img.filename)}</td>
+                    <td style="padding: 8px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(img.prompt || '-')}</td>
+                    <td style="padding: 8px; text-align: center;">${img.quality_score != null ? Number(img.quality_score).toFixed(0) : '-'}</td>
+                `;
+                list.appendChild(row);
+            });
+
+            listContainer.style.display = 'block';
+            window.missingImageIds = missingImages.map(img => img.id);
         }
     } catch (error) {
         console.error('检查失效图片失败:', error);
@@ -399,121 +492,161 @@ async function checkMissingFiles() {
     }
 }
 
-async function scanLocalImages() {
-    try {
-        showLoading();
-        const response = await fetch(`${API_BASE}/scan`, {
-            method: 'POST',
-        });
-        const data = await response.json();
-
-        if (data.success) {
-            Toast.success(data.message);
-            fetchImages();
-            fetchStats();
-        } else {
-            Toast.error('扫描失败，请重试');
-        }
-    } catch (error) {
-        console.error('扫描本地图片失败:', error);
-        Toast.error('扫描失败，请重试');
-    } finally {
-        hideLoading();
-    }
-}
-
 async function analyzeQuality(imageIds = null) {
+    state.analysisState.stopped = false;
     try {
-        // 显示停止按钮，隐藏分析按钮
         document.getElementById('analyze-btn').style.display = 'none';
         document.getElementById('stop-analysis-btn').style.display = 'inline-block';
 
         showLoading();
-        const response = await fetch(`${API_BASE}/analyze-quality`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                image_ids: imageIds,
-                update_metadata: true,
-                batch_size: 50,
-                skip_analyzed: state.analysisState.mode === 'skip',
-                max_workers: state.analysisState.maxWorkers
-            }),
-        });
-        const data = await response.json();
 
-        if (data.success) {
-            const mode = state.analysisState.mode === 'skip' ? '增量' : '全量';
-            const result = data.data;
+        const data = await Workspace.readMetadata();
+        const allImages = data.images || [];
+        const mode = state.analysisState.mode === 'skip' ? '增量' : '全量';
 
-            if (result.stopped) {
-                Toast.warning(`${mode}分析已停止：已完成 ${result.analyzed}/${result.total} 张`);
-            } else {
-                let message = `${mode}分析完成：成功 ${result.analyzed}, 失败 ${result.failed}, 低质量 ${result.low_quality_count}`;
-                if (result.skipped > 0) {
-                    message += `, 跳过 ${result.skipped}`;
-                }
-                Toast.success(message);
+        let toAnalyze = imageIds
+            ? allImages.filter(img => imageIds.includes(img.id))
+            : (state.analysisState.mode === 'skip'
+                ? allImages.filter(img => img.quality_score == null)
+                : allImages);
+
+        let analyzed = 0;
+        let failed = 0;
+
+        for (const img of toAnalyze) {
+            if (state.analysisState.stopped) break;
+
+            const objectURL = await Workspace.getImageURL(img.filename);
+            if (!objectURL) {
+                failed++;
+                continue;
             }
 
-            fetchImages();
-            fetchStats();
-        } else {
-            Toast.error('分析失败，请重试');
+            try {
+                const score = await _analyzeImageCanvas(objectURL);
+                await Workspace.updateImageMetadata(img.id, { quality_score: score });
+                analyzed++;
+            } catch (e) {
+                failed++;
+            } finally {
+                URL.revokeObjectURL(objectURL);
+            }
         }
+
+        const stopped = state.analysisState.stopped;
+        if (stopped) {
+            Toast.warning(`${mode}分析已停止：已完成 ${analyzed}/${toAnalyze.length} 张`);
+        } else {
+            Toast.success(`${mode}分析完成：成功 ${analyzed}，失败 ${failed}`);
+        }
+
+        fetchImages();
+        fetchStats();
     } catch (error) {
         console.error('分析图片质量失败:', error);
         Toast.error('分析失败，请重试');
     } finally {
         hideLoading();
-        // 恢复按钮状态
         document.getElementById('analyze-btn').style.display = 'inline-block';
         document.getElementById('stop-analysis-btn').style.display = 'none';
+        state.analysisState.stopped = false;
     }
 }
 
-async function stopAnalysis() {
-    try {
-        const response = await fetch(`${API_BASE}/stop-analysis`, {
-            method: 'POST',
-        });
-        const data = await response.json();
+function _analyzeImageCanvas(objectURL) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const canvas = document.createElement('canvas');
+                const maxDim = 256;
+                const ratio = img.naturalWidth / img.naturalHeight;
+                const w = ratio >= 1 ? maxDim : Math.round(maxDim * ratio);
+                const h = ratio >= 1 ? Math.round(maxDim / ratio) : maxDim;
+                canvas.width = w;
+                canvas.height = h;
 
-        if (data.success) {
-            Toast.info('正在停止分析...');
-        } else {
-            Toast.error('停止失败，请重试');
-        }
-    } catch (error) {
-        console.error('停止分析失败:', error);
-        Toast.error('停止失败，请重试');
-    }
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, w, h);
+                const pixels = ctx.getImageData(0, 0, w, h).data;
+
+                // 亮度评分
+                let totalBrightness = 0;
+                const pixelCount = pixels.length / 4;
+                const gray = new Float32Array(pixelCount);
+                for (let i = 0; i < pixels.length; i += 4) {
+                    const g = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+                    gray[i / 4] = g;
+                    totalBrightness += g;
+                }
+                const avgBrightness = totalBrightness / pixelCount;
+                const brightnessScore = avgBrightness < 20 ? avgBrightness * 2
+                    : avgBrightness > 230 ? (255 - avgBrightness) * 2
+                    : 100 - Math.abs(avgBrightness - 128) * 0.39;
+
+                // 模糊评分（Laplacian variance）
+                let lapSum = 0;
+                for (let y = 1; y < h - 1; y++) {
+                    for (let x = 1; x < w - 1; x++) {
+                        const i = y * w + x;
+                        const lap = gray[i - w] + gray[i + w] + gray[i - 1] + gray[i + 1] - 4 * gray[i];
+                        lapSum += lap * lap;
+                    }
+                }
+                const lapVar = lapSum / ((w - 2) * (h - 2));
+                const blurScore = Math.min(100, Math.sqrt(lapVar) * 2);
+
+                const score = Math.round(Math.max(0, Math.min(100, brightnessScore * 0.3 + blurScore * 0.7)));
+                resolve(score);
+            } catch (e) {
+                reject(e);
+            }
+        };
+        img.onerror = () => reject(new Error('Image load failed'));
+        img.src = objectURL;
+    });
+}
+
+function stopAnalysis() {
+    state.analysisState.stopped = true;
+    Toast.info('正在停止分析...');
 }
 
 async function uploadImages(files) {
+    const handle = Workspace.getHandle();
+    if (!handle) {
+        Toast.warning('请先设置工作目录，才能上传图片');
+        return;
+    }
+
     try {
         showLoading();
         let successCount = 0;
         let failCount = 0;
 
         for (const file of files) {
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('filename', file.name);
-            formData.append('tags', '上传');
-
             try {
-                const response = await fetch(`${API_BASE}/upload`, {
-                    method: 'POST',
-                    body: formData,
-                });
-                const data = await response.json();
+                const arrayBuffer = await file.arrayBuffer();
+                const bytes = new Uint8Array(arrayBuffer);
 
-                if (data.success) {
-                    successCount++;
-                } else {
-                    failCount++;
-                }
+                const fh = await handle.getFileHandle(file.name, { create: true });
+                const writable = await fh.createWritable();
+                await writable.write(bytes);
+                await writable.close();
+
+                const entry = {
+                    id: `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    filename: file.name,
+                    prompt: '',
+                    model: 'imported',
+                    aspect_ratio: '',
+                    created_at: Date.now(),
+                    file_size: file.size,
+                    tags: ['上传'],
+                    favorite: false,
+                };
+                await Workspace.addImageMetadata(entry);
+                successCount++;
             } catch (error) {
                 console.error(`上传图片失败 ${file.name}:`, error);
                 failCount++;
@@ -575,6 +708,18 @@ function renderImages() {
             : createImageListItem(image);
         container.appendChild(element);
     });
+
+    // 异步加载 ObjectURL（批量，非阻塞）
+    if (window.Workspace && Workspace.getHandle()) {
+        container.querySelectorAll('img[data-filename]').forEach(img => {
+            const filename = img.dataset.filename;
+            if (filename) {
+                Workspace.getImageURL(filename).then(url => {
+                    if (url) img.src = url;
+                }).catch(() => {});
+            }
+        });
+    }
 }
 
 function createImageCard(image) {
@@ -603,7 +748,7 @@ function createImageCard(image) {
         <input type="checkbox" class="image-card-checkbox" ${isSelected ? 'checked' : ''}>
         ${qualityBadge}
         <button class="favorite-btn ${favoriteClass}" data-id="${image.id}" title="${image.favorite ? '取消收藏' : '收藏'}">${favoriteIcon}</button>
-        <img src="/v1/files/image/${image.filename}" alt="${image.prompt}" class="image-card-img">
+        <img src="" data-filename="${image.filename}" alt="${image.prompt}" class="image-card-img">
         <div class="image-card-info">
             <div class="image-card-prompt">${escapeHtml(image.prompt)}</div>
             <div class="image-card-meta">
@@ -651,7 +796,7 @@ function createImageListItem(image) {
 
     item.innerHTML = `
         <input type="checkbox" class="image-list-checkbox" ${isSelected ? 'checked' : ''}>
-        <img src="/v1/files/image/${image.filename}" alt="${image.prompt}" class="image-list-img">
+        <img src="" data-filename="${image.filename}" alt="${image.prompt}" class="image-list-img">
         <div class="image-list-info">
             <div class="image-list-prompt">${escapeHtml(image.prompt)}</div>
             <div class="image-list-meta">
@@ -763,17 +908,21 @@ async function showImageDetail(imageId) {
     state.currentImageIndex = state.images.findIndex(img => img.id === imageId);
 
     const modal = document.getElementById('detail-modal');
-    document.getElementById('detail-image').src = `/v1/files/image/${image.filename}`;
+    const detailImg = document.getElementById('detail-image');
+    detailImg.src = '';
+    if (window.Workspace && Workspace.getHandle()) {
+        Workspace.getImageURL(image.filename).then(url => { if (url) detailImg.src = url; }).catch(() => {});
+    }
     document.getElementById('detail-prompt').textContent = image.prompt;
     document.getElementById('detail-model').textContent = image.model;
     document.getElementById('detail-ratio').textContent = image.aspect_ratio;
-    document.getElementById('detail-size').textContent = `${image.width} × ${image.height}`;
+    document.getElementById('detail-size').textContent = `${image.width || '-'} × ${image.height || '-'}`;
     document.getElementById('detail-filesize').textContent = formatFileSize(image.file_size);
     document.getElementById('detail-time').textContent = formatDate(image.created_at);
 
-    // 显示文件路径
+    // 显示文件名
     const filePathInput = document.getElementById('detail-file-path');
-    filePathInput.value = image.file_path || image.relative_path || '未知';
+    filePathInput.value = image.filename || '未知';
 
     // 更新收藏按钮状态
     const favoriteBtn = document.getElementById('favorite-detail-btn');
@@ -1136,12 +1285,19 @@ function initEventListeners() {
         const image = await fetchImageDetail(state.currentImageId);
         if (!image) return;
 
-        const a = document.createElement('a');
-        a.href = `/v1/files/image/${image.filename}`;
-        a.download = image.filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        if (window.Workspace && Workspace.getHandle()) {
+            const url = await Workspace.getImageURL(image.filename);
+            if (url) {
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = image.filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                return;
+            }
+        }
+        Toast.show('无法下载：请先设置工作目录', 'error');
     });
 
     // 删除单张图片
@@ -1205,49 +1361,33 @@ function initEventListeners() {
         const originalText = btn.innerHTML;
 
         try {
-            // 禁用按钮并显示加载状态
             btn.disabled = true;
             btn.innerHTML = '⏳ 分析中...';
             btn.style.opacity = '0.6';
 
-            // 显示加载提示
             Toast.info('开始分析图片质量...', '', 2000);
 
-            const response = await fetch(`${API_BASE}/analyze-quality`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    image_ids: [state.currentImageId],
-                    update_metadata: true,
-                    batch_size: 1,
-                    skip_analyzed: false,
-                    max_workers: 1,
-                    fast_mode: true
-                }),
-            });
-            const data = await response.json();
+            // 从本地 metadata 找到图片
+            const data = await Workspace.readMetadata();
+            const img = (data.images || []).find(i => i.id === state.currentImageId);
+            if (!img) throw new Error('图片元数据不存在');
 
-            if (data.success) {
-                const result = data.data;
-                if (result.analyzed > 0) {
-                    Toast.success(`分析完成！质量分数已更新`, '', 3000);
-                    // 重新加载图片详情
-                    await showImageDetail(state.currentImageId);
-                    // 刷新列表
-                    fetchImages();
-                } else if (result.failed > 0) {
-                    Toast.error('分析失败，请重试');
-                } else {
-                    Toast.warning('未能分析图片');
-                }
-            } else {
-                Toast.error('分析失败，请重试');
+            const objectURL = await Workspace.getImageURL(img.filename);
+            if (!objectURL) throw new Error('图片文件不存在于工作目录');
+
+            try {
+                const score = await _analyzeImageCanvas(objectURL);
+                await Workspace.updateImageMetadata(img.id, { quality_score: score });
+                Toast.success(`分析完成！质量分数已更新`, '', 3000);
+                await showImageDetail(state.currentImageId);
+                fetchImages();
+            } finally {
+                URL.revokeObjectURL(objectURL);
             }
         } catch (error) {
             console.error('重新分析图片失败:', error);
             Toast.error(`分析失败: ${error.message}`);
         } finally {
-            // 恢复按钮状态
             btn.disabled = false;
             btn.innerHTML = originalText;
             btn.style.opacity = '1';
@@ -1309,8 +1449,8 @@ function initEventListeners() {
     });
 
     // 停止分析按钮
-    document.getElementById('stop-analysis-btn').addEventListener('click', async () => {
-        await stopAnalysis();
+    document.getElementById('stop-analysis-btn').addEventListener('click', () => {
+        stopAnalysis();
     });
 
     // 分析选项按钮
@@ -1448,36 +1588,23 @@ function initEventListeners() {
 // 收藏功能
 async function toggleFavorite(imageId, favorite) {
     try {
-        const response = await fetch(`${API_BASE}/images/${imageId}/favorite`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ favorite }),
-        });
-        const data = await response.json();
-
-        if (data.success) {
-            Toast.success(favorite ? '已添加到收藏' : '已取消收藏');
-            // 更新本地状态
-            const image = state.images.find(img => img.id === imageId);
-            if (image) {
-                image.favorite = favorite;
+        if (!window.Workspace || !Workspace.getHandle()) return;
+        await Workspace.updateImageMetadata(imageId, { favorite });
+        Toast.show(favorite ? '已添加到收藏' : '已取消收藏', 'success');
+        const image = state.images.find(img => img.id === imageId);
+        if (image) image.favorite = favorite;
+        const card = document.querySelector(`.image-card[data-id="${imageId}"]`);
+        if (card) {
+            const favoriteBtn = card.querySelector('.favorite-btn');
+            if (favoriteBtn) {
+                favoriteBtn.classList.toggle('favorited', favorite);
+                favoriteBtn.textContent = favorite ? '❤️' : '🤍';
+                favoriteBtn.title = favorite ? '取消收藏' : '收藏';
             }
-            // 只更新这一张图片的UI，不重新渲染整个列表
-            const card = document.querySelector(`.image-card[data-id="${imageId}"]`);
-            if (card) {
-                const favoriteBtn = card.querySelector('.favorite-btn');
-                if (favoriteBtn) {
-                    favoriteBtn.classList.toggle('favorited', favorite);
-                    favoriteBtn.textContent = favorite ? '❤️' : '🤍';
-                    favoriteBtn.title = favorite ? '取消收藏' : '收藏';
-                }
-            }
-        } else {
-            Toast.error('操作失败，请重试');
         }
     } catch (error) {
         console.error('收藏操作失败:', error);
-        Toast.error('操作失败，请重试');
+        Toast.show('操作失败，请重试', 'error');
     }
 }
 
@@ -1672,7 +1799,7 @@ function updateEstimatedTime() {
 }
 
 // 初始化
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // 恢复用户偏好的 UI 状态
     document.getElementById('page-size-filter').value = state.pageSize.toString();
 
@@ -1682,6 +1809,40 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         document.getElementById('view-list').classList.add('active');
         document.getElementById('view-grid').classList.remove('active');
+    }
+
+    // 工作区检测与 banner
+    const banner = document.getElementById('workspace-banner');
+    const bannerMsg = document.getElementById('workspace-banner-msg');
+    const bannerBtn = document.getElementById('workspace-banner-btn');
+
+    async function setupWorkspace(skipPerm = false) {
+        if (!window.Workspace) return false;
+        if (!Workspace.isSupported()) {
+            if (banner) { banner.style.display = 'flex'; if (bannerMsg) bannerMsg.textContent = '⚠️ 浏览器不支持 File System API，请使用 Chrome/Edge。'; if (bannerBtn) bannerBtn.style.display = 'none'; }
+            return false;
+        }
+        const handle = await Workspace.initWorkspace();
+        if (!handle) { if (banner) banner.style.display = 'flex'; return false; }
+        const perm = skipPerm ? 'prompt' : await handle.queryPermission({ mode: 'readwrite' });
+        if (perm === 'granted') { if (banner) banner.style.display = 'none'; return true; }
+        if (banner) { banner.style.display = 'flex'; if (bannerBtn) bannerBtn.textContent = '重新授权目录'; }
+        return false;
+    }
+
+    const ready = await setupWorkspace();
+
+    if (bannerBtn) {
+        bannerBtn.addEventListener('click', async () => {
+            try {
+                await Workspace.requestWorkspace();
+                banner.style.display = 'none';
+                fetchStats();
+                fetchImages();
+            } catch (e) {
+                if (e.name !== 'AbortError') Toast.show('设置工作目录失败', 'error');
+            }
+        });
     }
 
     initEventListeners();

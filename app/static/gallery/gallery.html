@@ -19,8 +19,14 @@
 
         <!-- 主容器 -->
         <div class="container">
-            <!-- 统计卡片 -->
-            <div class="stats-container">
+        <!-- 工作目录提示条 -->
+        <div id="workspace-banner" style="display:none;margin-bottom:16px;" class="flex items-center justify-between px-4 py-3 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-800">
+          <span id="workspace-banner-msg">📁 尚未设置本地工作目录，图片将无法显示。</span>
+          <button id="workspace-banner-btn" class="ml-4 px-3 py-1 rounded bg-amber-500 text-white text-xs hover:bg-amber-600">设置工作目录</button>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="stats-container">
                 <div class="stat-card">
                     <div class="stat-icon">📊</div>
                     <div class="stat-content">
@@ -353,7 +359,9 @@
     </div>
 
     <script src="/static/common/dialog.js"></script>
-    <script src="/static/gallery/gallery.js?v=1.2.2"></script>
+    <script src="/static/common/workspace.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="/static/gallery/gallery.js?v=2.0"></script>
     <script>
         // 加载导航栏
         fetch('/static/common/header.html')

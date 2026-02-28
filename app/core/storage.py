@@ -723,9 +723,9 @@ class SQLStorage(BaseStorage):
         self.engine = create_async_engine(
             resolved_url,
             echo=False,
-            pool_size=20,
-            max_overflow=10,
-            pool_recycle=3600,
+            pool_size=5,
+            max_overflow=5,
+            pool_recycle=300,
             pool_pre_ping=True,
         )
         self.async_session = async_sessionmaker(self.engine, expire_on_commit=False)
@@ -775,12 +775,17 @@ class SQLStorage(BaseStorage):
                 """)
                 )
 
-                # 提示词表
+                # 提示词表（规范化：每条提示词一行）
                 await conn.execute(
                     text("""
                     CREATE TABLE IF NOT EXISTS prompts (
-                        id VARCHAR(64) PRIMARY KEY,
-                        data TEXT,
+                        id         VARCHAR(64)  PRIMARY KEY,
+                        title      VARCHAR(255) NOT NULL DEFAULT '',
+                        content    TEXT         NOT NULL DEFAULT '',
+                        category   VARCHAR(64)  DEFAULT '默认',
+                        tags       TEXT         DEFAULT '[]',
+                        favorite   BOOLEAN      DEFAULT FALSE,
+                        use_count  INTEGER      DEFAULT 0,
                         created_at BIGINT,
                         updated_at BIGINT
                     )
@@ -820,10 +825,88 @@ class SQLStorage(BaseStorage):
                 except Exception:
                     pass
 
+                # 提示词表迁移：旧架构（单行 JSON blob）→ 新架构（逐行存储）
+                await self._migrate_prompts_schema(conn)
+
             self._initialized = True
         except Exception as e:
             logger.error(f"SQLStorage: Schema 初始化失败: {e}")
             raise
+
+    async def _migrate_prompts_schema(self, conn):
+        """迁移提示词表：旧架构（单行 JSON blob）→ 新架构（逐行存储）"""
+        import json as _json
+        from sqlalchemy import text
+
+        try:
+            if self.dialect in ("postgres", "postgresql", "pgsql"):
+                schema_check = "public"
+                col_check = await conn.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = :s AND table_name = 'prompts' AND column_name = 'data'"
+                ), {"s": schema_check})
+            elif self.dialect in ("mysql", "mariadb"):
+                col_check = await conn.execute(text(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_NAME = 'prompts' AND COLUMN_NAME = 'data'"
+                ))
+            else:
+                return
+
+            if not col_check.fetchone():
+                return  # already new schema
+
+            # Old schema detected: read the blob row
+            old_row = await conn.execute(text(
+                "SELECT data FROM prompts WHERE id = 'prompts'"
+            ))
+            row = old_row.fetchone()
+            old_prompts = []
+            if row and row[0]:
+                try:
+                    old_data = _json.loads(row[0])
+                    old_prompts = old_data.get("prompts", [])
+                except Exception:
+                    pass
+
+            # Drop and recreate with new schema
+            await conn.execute(text("DROP TABLE prompts"))
+            await conn.execute(text("""
+                CREATE TABLE prompts (
+                    id         VARCHAR(64)  PRIMARY KEY,
+                    title      VARCHAR(255) NOT NULL DEFAULT '',
+                    content    TEXT         NOT NULL DEFAULT '',
+                    category   VARCHAR(64)  DEFAULT '默认',
+                    tags       TEXT         DEFAULT '[]',
+                    favorite   BOOLEAN      DEFAULT FALSE,
+                    use_count  INTEGER      DEFAULT 0,
+                    created_at BIGINT,
+                    updated_at BIGINT
+                )
+            """))
+
+            # Re-insert migrated prompts
+            for p in old_prompts:
+                if not p.get("id"):
+                    continue
+                await conn.execute(text(
+                    "INSERT INTO prompts (id, title, content, category, tags, favorite, use_count, created_at, updated_at) "
+                    "VALUES (:id, :title, :content, :category, :tags, :favorite, :use_count, :created_at, :updated_at)"
+                ), {
+                    "id": p.get("id", ""),
+                    "title": p.get("title", ""),
+                    "content": p.get("content", ""),
+                    "category": p.get("category", "默认"),
+                    "tags": _json.dumps(p.get("tags", [])),
+                    "favorite": bool(p.get("favorite", False)),
+                    "use_count": int(p.get("use_count", 0)),
+                    "created_at": p.get("created_at"),
+                    "updated_at": p.get("updated_at"),
+                })
+
+            logger.info(f"SQLStorage: 提示词表迁移完成，共迁移 {len(old_prompts)} 条")
+        except Exception as e:
+            logger.warning(f"SQLStorage: 提示词表迁移跳过: {e}")
 
     @asynccontextmanager
     async def acquire_lock(self, name: str, timeout: int = 10):
@@ -1044,44 +1127,69 @@ class SQLStorage(BaseStorage):
 
     async def load_prompts(self) -> Dict[str, Any]:
         await self._ensure_schema()
+        import json as _json
         from sqlalchemy import text
 
         try:
             async with self.async_session() as session:
-                res = await session.execute(
-                    text("SELECT data FROM prompts WHERE id = 'prompts'")
-                )
-                row = res.fetchone()
-                if not row:
+                res = await session.execute(text(
+                    "SELECT id, title, content, category, tags, favorite, use_count, created_at, updated_at "
+                    "FROM prompts ORDER BY updated_at DESC"
+                ))
+                rows = res.fetchall()
+                if not rows:
                     return {"prompts": [], "version": "1.0"}
 
-                try:
-                    return json_loads(row[0])
-                except Exception:
-                    return {"prompts": [], "version": "1.0"}
+                prompts = []
+                for row in rows:
+                    id_, title, content, category, tags_str, favorite, use_count, created_at, updated_at = row
+                    try:
+                        tags = _json.loads(tags_str) if tags_str else []
+                    except Exception:
+                        tags = []
+                    prompts.append({
+                        "id": id_,
+                        "title": title or "",
+                        "content": content or "",
+                        "category": category or "默认",
+                        "tags": tags,
+                        "favorite": bool(favorite),
+                        "use_count": int(use_count or 0),
+                        "created_at": created_at or 0,
+                        "updated_at": updated_at or 0,
+                    })
+                return {"prompts": prompts, "version": "1.0"}
         except Exception as e:
             logger.error(f"SQLStorage: 加载提示词失败: {e}")
             return {"prompts": [], "version": "1.0"}
 
     async def save_prompts(self, data: Dict[str, Any]):
         await self._ensure_schema()
+        import json as _json
         from sqlalchemy import text
 
         try:
             async with self.async_session() as session:
-                data_json = json_dumps(data)
-                now = int(time.time() * 1000)
+                await session.execute(text("DELETE FROM prompts"))
 
-                # Upsert 逻辑
-                await session.execute(
-                    text("DELETE FROM prompts WHERE id = 'prompts'")
-                )
-                await session.execute(
-                    text(
-                        "INSERT INTO prompts (id, data, created_at, updated_at) VALUES (:id, :data, :created_at, :updated_at)"
-                    ),
-                    {"id": "prompts", "data": data_json, "created_at": now, "updated_at": now},
-                )
+                for p in data.get("prompts", []):
+                    if not p.get("id"):
+                        continue
+                    await session.execute(text(
+                        "INSERT INTO prompts (id, title, content, category, tags, favorite, use_count, created_at, updated_at) "
+                        "VALUES (:id, :title, :content, :category, :tags, :favorite, :use_count, :created_at, :updated_at)"
+                    ), {
+                        "id": p.get("id", ""),
+                        "title": p.get("title", ""),
+                        "content": p.get("content", ""),
+                        "category": p.get("category", "默认"),
+                        "tags": _json.dumps(p.get("tags", [])),
+                        "favorite": bool(p.get("favorite", False)),
+                        "use_count": int(p.get("use_count", 0)),
+                        "created_at": p.get("created_at"),
+                        "updated_at": p.get("updated_at"),
+                    })
+
                 await session.commit()
         except Exception as e:
             logger.error(f"SQLStorage: 保存提示词失败: {e}")

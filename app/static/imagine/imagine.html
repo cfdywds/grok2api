@@ -26,6 +26,12 @@
           <p class="text-[var(--accents-4)] mt-1 text-sm">通过 WebSocket 持续生成图片，实时展示 base64 瀑布流。</p>
         </div>
 
+        <!-- 工作目录提示条 -->
+        <div id="workspace-banner" style="display:none;" class="flex items-center justify-between px-4 py-3 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-800">
+          <span>📁 尚未设置本地工作目录，生成的图片将无法保存到本地。</span>
+          <button id="workspace-banner-btn" class="ml-4 px-3 py-1 rounded bg-amber-500 text-white text-xs hover:bg-amber-600">设置工作目录</button>
+        </div>
+
         <div class="h-px bg-[var(--border)]"></div>
 
       <div class="imagine-top-grid">
@@ -262,8 +268,9 @@
   <script src="/static/common/footer.js?v=1"></script>
   <script src="/static/common/toast.js"></script>
   <script src="/static/common/dialog.js"></script>
+  <script src="/static/common/workspace.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="/static/imagine/imagine.js?v=8"></script>
+  <script src="/static/imagine/imagine.js?v=9"></script>
 </body>
 
 </html>
