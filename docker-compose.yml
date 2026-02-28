@@ -6,7 +6,8 @@ services:
       - "8080:8080"
     environment:
       TZ: Asia/Shanghai
-      LOG_LEVEL: INFO
+      LOG_LEVEL: WARNING
+      LOG_FILE_ENABLED: "false"
       SERVER_PORT: 8080
       SERVER_WORKERS: 1
       SERVER_STORAGE_TYPE: local

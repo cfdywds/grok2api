@@ -122,11 +122,18 @@ def setup_logging(
     # 文件输出
     if file_logging:
         if _prepare_log_dir():
+            max_bytes = int(os.getenv("LOG_MAX_KB", "100")) * 1024  # 默认 100 KB ≈ 500 行
+
+            def _json_formatter(record) -> str:
+                return _format_json(record) + "\n"
+
             logger.add(
-                _file_json_sink,
+                str(LOG_DIR / "app_{time:YYYY-MM-DD}.log"),
                 level=level,
-                format="{message}",
+                format=_json_formatter,
                 enqueue=True,
+                rotation=max_bytes,
+                retention=0,  # 轮转后立即删除旧文件，只保留当前日志
             )
         else:
             logger.warning("File logging disabled: no writable log directory.")

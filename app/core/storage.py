@@ -736,9 +736,10 @@ class SQLStorage(BaseStorage):
         if self._initialized:
             return
         try:
-            async with self.engine.begin() as conn:
-                from sqlalchemy import text
+            from sqlalchemy import text
 
+            # 第一步：创建表（均使用 IF NOT EXISTS，不会失败）
+            async with self.engine.begin() as conn:
                 # Tokens 表 (通用 SQL)
                 await conn.execute(
                     text("""
@@ -792,22 +793,21 @@ class SQLStorage(BaseStorage):
                 """)
                 )
 
-                # 索引
+            # 第二步：创建索引（每个索引独立事务，失败不影响其他步骤）
+            for idx_sql in [
+                "CREATE INDEX idx_tokens_pool ON tokens (pool_name)",
+                "CREATE INDEX idx_image_metadata_created ON image_metadata (created_at)",
+                "CREATE INDEX idx_prompts_created ON prompts (created_at)",
+            ]:
                 try:
-                    await conn.execute(
-                        text("CREATE INDEX idx_tokens_pool ON tokens (pool_name)")
-                    )
-                    await conn.execute(
-                        text("CREATE INDEX idx_image_metadata_created ON image_metadata (created_at)")
-                    )
-                    await conn.execute(
-                        text("CREATE INDEX idx_prompts_created ON prompts (created_at)")
-                    )
+                    async with self.engine.begin() as conn:
+                        await conn.execute(text(idx_sql))
                 except Exception:
                     pass
 
-                # 尝试兼容旧表结构
-                try:
+            # 第三步：兼容旧 tokens 表列类型（独立事务）
+            try:
+                async with self.engine.begin() as conn:
                     if self.dialect in ("mysql", "mariadb"):
                         await conn.execute(
                             text("ALTER TABLE tokens MODIFY token VARCHAR(512)")
@@ -822,22 +822,22 @@ class SQLStorage(BaseStorage):
                         await conn.execute(
                             text("ALTER TABLE tokens ALTER COLUMN data TYPE TEXT")
                         )
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
-                # 提示词表迁移：旧架构（单行 JSON blob）→ 新架构（逐行存储）
-                await self._migrate_prompts_schema(conn)
+            # 第四步：提示词表迁移（旧架构 → 新架构，独立事务）
+            await self._migrate_prompts_schema()
 
-                # 补齐 prompts 表缺失的列（兼容已存在但缺少新列的旧表）
-                await self._ensure_prompts_columns(conn)
+            # 第五步：补齐 prompts 表缺失的列（独立事务）
+            await self._ensure_prompts_columns()
 
             self._initialized = True
         except Exception as e:
             logger.error(f"SQLStorage: Schema 初始化失败: {e}")
             raise
 
-    async def _ensure_prompts_columns(self, conn):
-        """确保 prompts 表包含所有必需列（兼容旧表结构）"""
+    async def _ensure_prompts_columns(self):
+        """确保 prompts 表包含所有必需列（兼容旧表结构，独立事务）"""
         from sqlalchemy import text
 
         required_columns = {
@@ -852,27 +852,29 @@ class SQLStorage(BaseStorage):
         }
 
         try:
-            if self.dialect in ("postgres", "postgresql", "pgsql"):
-                existing = await conn.execute(text(
-                    "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_schema = 'public' AND table_name = 'prompts'"
-                ))
-            elif self.dialect in ("mysql", "mariadb"):
-                existing = await conn.execute(text(
-                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
-                    "WHERE TABLE_NAME = 'prompts'"
-                ))
-            else:
-                return
+            async with self.engine.begin() as conn:
+                if self.dialect in ("postgres", "postgresql", "pgsql"):
+                    existing = await conn.execute(text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'public' AND table_name = 'prompts'"
+                    ))
+                elif self.dialect in ("mysql", "mariadb"):
+                    existing = await conn.execute(text(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                        "WHERE TABLE_NAME = 'prompts'"
+                    ))
+                else:
+                    return
 
-            existing_cols = {row[0].lower() for row in existing.fetchall()}
+                existing_cols = {row[0].lower() for row in existing.fetchall()}
 
             for col_name, col_def in required_columns.items():
                 if col_name.lower() not in existing_cols:
                     try:
-                        await conn.execute(text(
-                            f"ALTER TABLE prompts ADD COLUMN {col_name} {col_def}"
-                        ))
+                        async with self.engine.begin() as conn:
+                            await conn.execute(text(
+                                f"ALTER TABLE prompts ADD COLUMN {col_name} {col_def}"
+                            ))
                         logger.info(f"SQLStorage: 已补齐 prompts 列: {col_name}")
                     except Exception as e:
                         logger.warning(f"SQLStorage: 补齐列 {col_name} 跳过: {e}")
@@ -880,34 +882,39 @@ class SQLStorage(BaseStorage):
         except Exception as e:
             logger.warning(f"SQLStorage: prompts 列检查跳过: {e}")
 
-    async def _migrate_prompts_schema(self, conn):
-        """迁移提示词表：旧架构（单行 JSON blob）→ 新架构（逐行存储）"""
+    async def _migrate_prompts_schema(self):
+        """迁移提示词表：旧架构（单行 JSON blob）→ 新架构（逐行存储，独立事务）"""
         import json as _json
         from sqlalchemy import text
 
         try:
-            if self.dialect in ("postgres", "postgresql", "pgsql"):
-                schema_check = "public"
-                col_check = await conn.execute(text(
-                    "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_schema = :s AND table_name = 'prompts' AND column_name = 'data'"
-                ), {"s": schema_check})
-            elif self.dialect in ("mysql", "mariadb"):
-                col_check = await conn.execute(text(
-                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
-                    "WHERE TABLE_NAME = 'prompts' AND COLUMN_NAME = 'data'"
+            # 第一步：检查是否存在旧 data 列（独立只读事务）
+            async with self.engine.begin() as conn:
+                if self.dialect in ("postgres", "postgresql", "pgsql"):
+                    schema_check = "public"
+                    col_check = await conn.execute(text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = :s AND table_name = 'prompts' AND column_name = 'data'"
+                    ), {"s": schema_check})
+                elif self.dialect in ("mysql", "mariadb"):
+                    col_check = await conn.execute(text(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                        "WHERE TABLE_NAME = 'prompts' AND COLUMN_NAME = 'data'"
+                    ))
+                else:
+                    return
+
+                has_old_schema = col_check.fetchone() is not None
+
+                if not has_old_schema:
+                    return  # already new schema
+
+                # 读取旧数据
+                old_row = await conn.execute(text(
+                    "SELECT data FROM prompts WHERE id = 'prompts'"
                 ))
-            else:
-                return
+                row = old_row.fetchone()
 
-            if not col_check.fetchone():
-                return  # already new schema
-
-            # Old schema detected: read the blob row
-            old_row = await conn.execute(text(
-                "SELECT data FROM prompts WHERE id = 'prompts'"
-            ))
-            row = old_row.fetchone()
             old_prompts = []
             if row and row[0]:
                 try:
@@ -916,40 +923,45 @@ class SQLStorage(BaseStorage):
                 except Exception:
                     pass
 
-            # Drop and recreate with new schema
-            await conn.execute(text("DROP TABLE prompts"))
-            await conn.execute(text("""
-                CREATE TABLE prompts (
-                    id         VARCHAR(64)  PRIMARY KEY,
-                    title      VARCHAR(255) NOT NULL DEFAULT '',
-                    content    TEXT         NOT NULL DEFAULT '',
-                    category   VARCHAR(64)  DEFAULT '默认',
-                    tags       TEXT         DEFAULT '[]',
-                    favorite   BOOLEAN      DEFAULT FALSE,
-                    use_count  INTEGER      DEFAULT 0,
-                    created_at BIGINT,
-                    updated_at BIGINT
-                )
-            """))
+            # 第二步：重建表（独立 DDL 事务）
+            async with self.engine.begin() as conn:
+                await conn.execute(text("DROP TABLE prompts"))
+                await conn.execute(text("""
+                    CREATE TABLE prompts (
+                        id         VARCHAR(64)  PRIMARY KEY,
+                        title      VARCHAR(255) NOT NULL DEFAULT '',
+                        content    TEXT         NOT NULL DEFAULT '',
+                        category   VARCHAR(64)  DEFAULT '默认',
+                        tags       TEXT         DEFAULT '[]',
+                        favorite   BOOLEAN      DEFAULT FALSE,
+                        use_count  INTEGER      DEFAULT 0,
+                        created_at BIGINT,
+                        updated_at BIGINT
+                    )
+                """))
 
-            # Re-insert migrated prompts
+            # 第三步：写回数据
             for p in old_prompts:
                 if not p.get("id"):
                     continue
-                await conn.execute(text(
-                    "INSERT INTO prompts (id, title, content, category, tags, favorite, use_count, created_at, updated_at) "
-                    "VALUES (:id, :title, :content, :category, :tags, :favorite, :use_count, :created_at, :updated_at)"
-                ), {
-                    "id": p.get("id", ""),
-                    "title": p.get("title", ""),
-                    "content": p.get("content", ""),
-                    "category": p.get("category", "默认"),
-                    "tags": _json.dumps(p.get("tags", [])),
-                    "favorite": bool(p.get("favorite", False)),
-                    "use_count": int(p.get("use_count", 0)),
-                    "created_at": p.get("created_at"),
-                    "updated_at": p.get("updated_at"),
-                })
+                try:
+                    async with self.engine.begin() as conn:
+                        await conn.execute(text(
+                            "INSERT INTO prompts (id, title, content, category, tags, favorite, use_count, created_at, updated_at) "
+                            "VALUES (:id, :title, :content, :category, :tags, :favorite, :use_count, :created_at, :updated_at)"
+                        ), {
+                            "id": p.get("id", ""),
+                            "title": p.get("title", ""),
+                            "content": p.get("content", ""),
+                            "category": p.get("category", "默认"),
+                            "tags": _json.dumps(p.get("tags", [])),
+                            "favorite": bool(p.get("favorite", False)),
+                            "use_count": int(p.get("use_count", 0)),
+                            "created_at": p.get("created_at"),
+                            "updated_at": p.get("updated_at"),
+                        })
+                except Exception as e:
+                    logger.warning(f"SQLStorage: 迁移提示词 {p.get('id')} 跳过: {e}")
 
             logger.info(f"SQLStorage: 提示词表迁移完成，共迁移 {len(old_prompts)} 条")
         except Exception as e:
