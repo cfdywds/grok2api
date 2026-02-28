@@ -170,18 +170,7 @@
   <script src="/static/common/dialog.js"></script>
   <script src="/static/common/workspace.js"></script>
   <script src="/static/gallery/random.js"></script>
-  <script>
-    // 加载导航栏
-    fetch('/static/common/header.html')
-      .then(response => response.text())
-      .then(html => {
-        document.getElementById('header-container').innerHTML = html;
-        // 设置当前页面高亮
-        const currentLink = document.querySelector('[data-nav="/admin/gallery/random"]');
-        if (currentLink) {
-          currentLink.classList.add('active');
-        }
-      });
-  </script>
+  <script src="/static/common/admin-auth.js?v=3"></script>
+  <script src="/static/common/header.js?v=5"></script>
 </body>
 </html>

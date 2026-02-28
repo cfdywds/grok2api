@@ -3,11 +3,11 @@ services:
     container_name: grok2api
     image: ghcr.io/chenyme/grok2api:latest
     ports:
-      - "8000:8000"
+      - "8080:8080"
     environment:
       TZ: Asia/Shanghai
       LOG_LEVEL: INFO
-      SERVER_PORT: 8000
+      SERVER_PORT: 8080
       SERVER_WORKERS: 1
       SERVER_STORAGE_TYPE: local
       # SERVER_STORAGE_URL: 

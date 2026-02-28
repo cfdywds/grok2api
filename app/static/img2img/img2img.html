@@ -274,14 +274,8 @@
   <script src="/static/common/toast.js"></script>
   <script src="/static/common/workspace.js"></script>
   <script src="/static/img2img/img2img.js?v=4"></script>
-  <script>
-    // 加载导航栏
-    fetch('/static/common/header.html')
-      .then(response => response.text())
-      .then(html => {
-        document.getElementById('app-header').innerHTML = html;
-      });
-  </script>
+  <script src="/static/common/admin-auth.js?v=3"></script>
+  <script src="/static/common/header.js?v=5"></script>
 </body>
 
 </html>

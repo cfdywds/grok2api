@@ -1,5 +1,5 @@
 async function loadAdminHeader() {
-  const container = document.getElementById('app-header');
+  const container = document.getElementById('app-header') || document.getElementById('header-container');
   if (!container) return;
   try {
     const res = await fetch('/static/common/header.html?v=6');
