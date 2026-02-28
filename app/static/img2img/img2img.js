@@ -29,10 +29,20 @@ const Toast = window.Toast || {
 };
 
 // 初始化
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   initEventListeners();
   updateUI();
+  await initWorkspace();
 });
+
+async function initWorkspace() {
+  if (!window.Workspace) return;
+  const handle = await Workspace.initWorkspace();
+  if (!handle) {
+    const banner = document.getElementById('workspace-banner');
+    if (banner) banner.style.display = 'flex';
+  }
+}
 
 // 事件监听器
 function initEventListeners() {
@@ -44,6 +54,22 @@ function initEventListeners() {
   const modalClose = document.getElementById('modalClose');
   const modalDownload = document.getElementById('modalDownload');
   const imageModal = document.getElementById('imageModal');
+
+  // Workspace banner 按钮
+  const workspaceBannerBtn = document.getElementById('workspace-banner-btn');
+  if (workspaceBannerBtn) {
+    workspaceBannerBtn.addEventListener('click', async () => {
+      try {
+        const handle = await Workspace.requestWorkspace();
+        if (handle) {
+          document.getElementById('workspace-banner').style.display = 'none';
+          Toast.success(`工作目录已设置: ${handle.name}`);
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError') Toast.error('设置工作目录失败');
+      }
+    });
+  }
 
   // 上传区域点击
   uploadZone.addEventListener('click', (e) => {
@@ -319,10 +345,28 @@ async function generateImagesNonStream(prompt, count, format) {
 
       if (imageData && imageData !== 'error') {
         const dataUrl = imageData.startsWith('data:') ? imageData : `data:image/png;base64,${imageData}`;
-        state.generatedImages.push({
-          data: dataUrl,
-          filename: `img2img_${Date.now()}_${i + 1}.png`
-        });
+        const ts = Date.now();
+        const filename = `img2img_${ts}_${i + 1}.png`;
+        state.generatedImages.push({ data: dataUrl, filename });
+
+        if (window.Workspace) {
+          const base64 = dataUrl.split(',')[1];
+          const imgIdx = i + 1;
+          Workspace.saveImage(base64, filename).then(ok => {
+            if (!ok) return;
+            return Workspace.addImageMetadata({
+              id: `img2img_${ts}_${imgIdx}`,
+              filename,
+              prompt,
+              model: 'grok-imagine-1.0-edit',
+              aspect_ratio: '',
+              created_at: ts,
+              file_size: Math.round(base64.length * 0.75),
+              tags: ['图生图'],
+              favorite: false,
+            });
+          }).catch(() => {});
+        }
       }
     }
 
@@ -384,10 +428,29 @@ async function generateImagesStream(prompt, count, format) {
 
           if (imageData && imageData !== 'error') {
             const dataUrl = imageData.startsWith('data:') ? imageData : `data:image/png;base64,${imageData}`;
-            state.generatedImages.push({
-              data: dataUrl,
-              filename: `img2img_${Date.now()}_${++imageCount}.png`
-            });
+            ++imageCount;
+            const ts = Date.now();
+            const imgIdx = imageCount;
+            const filename = `img2img_${ts}_${imgIdx}.png`;
+            state.generatedImages.push({ data: dataUrl, filename });
+
+            if (window.Workspace) {
+              const base64 = dataUrl.split(',')[1];
+              Workspace.saveImage(base64, filename).then(ok => {
+                if (!ok) return;
+                return Workspace.addImageMetadata({
+                  id: `img2img_${ts}_${imgIdx}`,
+                  filename,
+                  prompt,
+                  model: 'grok-imagine-1.0-edit',
+                  aspect_ratio: '',
+                  created_at: ts,
+                  file_size: Math.round(base64.length * 0.75),
+                  tags: ['图生图'],
+                  favorite: false,
+                });
+              }).catch(() => {});
+            }
 
             // 实时更新 UI
             updateUI();
