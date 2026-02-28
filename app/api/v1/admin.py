@@ -41,8 +41,6 @@ from app.services.grok.models.model import ModelService
 from app.services.grok.processors.image_ws_processors import ImageWSCollectProcessor
 from app.services.grok.processors import ImageStreamProcessor, ImageCollectProcessor
 from app.services.token import EffortType
-from app.services.gallery import ImageMetadata
-from app.services.gallery.service import get_image_metadata_service
 
 TEMPLATE_DIR = Path(__file__).parent.parent.parent / "static"
 
@@ -361,91 +359,6 @@ async def _verify_imagine_ws_auth(websocket: WebSocket) -> tuple[bool, Optional[
     return key == api_key, None
 
 
-async def _save_ws_image_metadata(
-    images: list,
-    prompt: str,
-    aspect_ratio: str,
-    elapsed_ms: int,
-    run_id: str,
-):
-    """
-    异步保存 WebSocket 图片元数据
-
-    Args:
-        images: 生成的图片列表（base64）
-        prompt: 提示词
-        aspect_ratio: 宽高比
-        elapsed_ms: 生成耗时（毫秒）
-        run_id: 运行ID
-    """
-    try:
-        import base64
-        service = get_image_metadata_service()
-        image_dir = Path(__file__).parent.parent.parent.parent / "data" / "tmp" / "image"
-        image_dir.mkdir(parents=True, exist_ok=True)
-
-        for img_b64 in images:
-            if not img_b64 or img_b64 == "error":
-                continue
-
-            try:
-                # 生成唯一 ID
-                image_id = str(uuid.uuid4())
-                filename = f"{image_id}.jpg"
-                file_path = image_dir / filename
-
-                # 解码并保存图片文件
-                image_bytes = base64.b64decode(img_b64)
-                file_path.write_bytes(image_bytes)
-
-                # 获取文件信息
-                file_size = file_path.stat().st_size
-
-                # 解析宽高比
-                width, height = 1024, 1024
-                if aspect_ratio:
-                    try:
-                        w_str, h_str = aspect_ratio.split(":")
-                        ratio = int(w_str) / int(h_str)
-                        if ratio > 1:
-                            width = 1536
-                            height = int(1536 / ratio)
-                        elif ratio < 1:
-                            height = 1536
-                            width = int(1536 * ratio)
-                    except Exception:
-                        pass
-
-                # 创建元数据
-                metadata = ImageMetadata(
-                    id=image_id,
-                    filename=filename,
-                    prompt=prompt,
-                    model="grok-imagine-1.0",
-                    aspect_ratio=aspect_ratio or "1:1",
-                    created_at=int(time.time() * 1000),
-                    file_size=file_size,
-                    width=width,
-                    height=height,
-                    tags=[],
-                    nsfw=False,
-                    metadata={
-                        "elapsed_ms": elapsed_ms,
-                        "run_id": run_id,
-                    },
-                )
-
-                # 保存元数据
-                await service.add_image(metadata)
-                logger.info(f"保存 WebSocket 图片元数据成功: {image_id}")
-
-            except Exception as e:
-                logger.error(f"保存单张 WebSocket 图片元数据失败: {e}")
-                continue
-
-    except Exception as e:
-        logger.error(f"保存 WebSocket 图片元数据失败: {e}")
-
 
 @router.websocket("/api/v1/admin/imagine/ws")
 async def admin_imagine_ws(websocket: WebSocket):
@@ -562,14 +475,7 @@ async def admin_imagine_ws(websocket: WebSocket):
                             }
                         )
 
-                    # 异步保存元数据
-                    asyncio.create_task(_save_ws_image_metadata(
-                        images=images,
-                        prompt=prompt,
-                        aspect_ratio=aspect_ratio,
-                        elapsed_ms=elapsed_ms,
-                        run_id=run_id,
-                    ))
+                    # 图片已由客户端本地存储，服务端不再保存
 
                     # 消耗 token（6 张图片按高成本计算）
                     try:
@@ -2333,77 +2239,7 @@ async def admin_img2img(
             selected_images.append("error")
     logger.info(f"图生图选择的图片数量: {len(selected_images)}, 包含error: {selected_images.count('error')}")
 
-    # 保存图片元数据到图片管理系统
-    try:
-        service = get_image_metadata_service()
-        image_dir = Path(__file__).parent.parent.parent.parent / "data" / "tmp" / "image"
-        image_dir.mkdir(parents=True, exist_ok=True)
-
-        for img_b64 in selected_images:
-            if not img_b64 or img_b64 == "error":
-                continue
-
-            try:
-                # 生成唯一 ID
-                image_id = str(uuid.uuid4())
-                filename = f"{image_id}.jpg"
-                file_path = image_dir / filename
-
-                # 解码并保存图片文件
-                if img_b64.startswith("data:"):
-                    img_b64 = img_b64.split(",", 1)[1]
-                image_bytes = base64.b64decode(img_b64)
-                file_path.write_bytes(image_bytes)
-
-                # 获取文件信息
-                file_size = file_path.stat().st_size
-
-                # 解析尺寸
-                width, height = 1024, 1024
-                try:
-                    w_str, h_str = size.split("x")
-                    width = int(w_str)
-                    height = int(h_str)
-                except Exception:
-                    pass
-
-                # 计算宽高比
-                from math import gcd
-                gcd_val = gcd(width, height)
-                aspect_w = width // gcd_val
-                aspect_h = height // gcd_val
-                aspect_ratio = f"{aspect_w}:{aspect_h}"
-
-                # 创建元数据
-                metadata = ImageMetadata(
-                    id=image_id,
-                    filename=filename,
-                    prompt=prompt,
-                    model=model or "grok-imagine-1.0-edit",
-                    aspect_ratio=aspect_ratio,
-                    created_at=int(time.time() * 1000),
-                    file_size=file_size,
-                    width=width,
-                    height=height,
-                    tags=["图生图"],
-                    nsfw=False,
-                    metadata={
-                        "source": "img2img",
-                        "quality": quality,
-                        "style": style or "",
-                    },
-                )
-
-                # 保存元数据
-                await service.add_image(metadata)
-                logger.info(f"保存图生图元数据成功: {image_id}")
-
-            except Exception as e:
-                logger.error(f"保存图生图元数据失败: {e}")
-                continue
-
-    except Exception as e:
-        logger.error(f"保存图生图元数据失败: {e}")
+    # 图片已由客户端本地存储，服务端不再保存
 
     data = [{response_field: img} for img in selected_images]
 

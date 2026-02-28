@@ -363,14 +363,18 @@ td.table-empty {
   flex-direction: column;
   justify-content: center;
   gap: 4px;
-  width: 32px;
-  height: 32px;
-  padding: 6px;
+  width: 40px;
+  height: 40px;
+  padding: 8px;
   border: none;
   background: transparent;
   cursor: pointer;
   border-radius: 6px;
   transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  position: relative;
+  z-index: 2;
 }
 
 .nav-hamburger:hover {
@@ -404,16 +408,19 @@ td.table-empty {
   flex-direction: column;
   background: var(--bg);
   border-top: 1px solid var(--border);
-  padding: 12px 24px 16px;
+  padding: 0 24px;
   max-height: 0;
   overflow: hidden;
   opacity: 0;
+  pointer-events: none;
   transition: max-height 0.3s ease, opacity 0.2s ease, padding 0.3s ease;
 }
 
 .nav-mobile-menu.is-open {
   max-height: 500px;
   opacity: 1;
+  padding: 12px 24px 16px;
+  pointer-events: auto;
 }
 
 .nav-mobile-section {

@@ -828,10 +828,57 @@ class SQLStorage(BaseStorage):
                 # 提示词表迁移：旧架构（单行 JSON blob）→ 新架构（逐行存储）
                 await self._migrate_prompts_schema(conn)
 
+                # 补齐 prompts 表缺失的列（兼容已存在但缺少新列的旧表）
+                await self._ensure_prompts_columns(conn)
+
             self._initialized = True
         except Exception as e:
             logger.error(f"SQLStorage: Schema 初始化失败: {e}")
             raise
+
+    async def _ensure_prompts_columns(self, conn):
+        """确保 prompts 表包含所有必需列（兼容旧表结构）"""
+        from sqlalchemy import text
+
+        required_columns = {
+            "title":      "VARCHAR(255) NOT NULL DEFAULT ''",
+            "content":    "TEXT NOT NULL DEFAULT ''",
+            "category":   "VARCHAR(64) DEFAULT '默认'",
+            "tags":       "TEXT DEFAULT '[]'",
+            "favorite":   "BOOLEAN DEFAULT FALSE",
+            "use_count":  "INTEGER DEFAULT 0",
+            "created_at": "BIGINT",
+            "updated_at": "BIGINT",
+        }
+
+        try:
+            if self.dialect in ("postgres", "postgresql", "pgsql"):
+                existing = await conn.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'prompts'"
+                ))
+            elif self.dialect in ("mysql", "mariadb"):
+                existing = await conn.execute(text(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_NAME = 'prompts'"
+                ))
+            else:
+                return
+
+            existing_cols = {row[0].lower() for row in existing.fetchall()}
+
+            for col_name, col_def in required_columns.items():
+                if col_name.lower() not in existing_cols:
+                    try:
+                        await conn.execute(text(
+                            f"ALTER TABLE prompts ADD COLUMN {col_name} {col_def}"
+                        ))
+                        logger.info(f"SQLStorage: 已补齐 prompts 列: {col_name}")
+                    except Exception as e:
+                        logger.warning(f"SQLStorage: 补齐列 {col_name} 跳过: {e}")
+
+        except Exception as e:
+            logger.warning(f"SQLStorage: prompts 列检查跳过: {e}")
 
     async def _migrate_prompts_schema(self, conn):
         """迁移提示词表：旧架构（单行 JSON blob）→ 新架构（逐行存储）"""
