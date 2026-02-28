@@ -852,7 +852,7 @@ class SQLStorage(BaseStorage):
                         pass
         elif self.dialect in ("postgres", "postgresql", "pgsql"):
             lock_key = int.from_bytes(
-                hashlib.sha256(name.encode("utf-8")).digest()[:8], "big", signed=False
+                hashlib.sha256(name.encode("utf-8")).digest()[:8], "big", signed=True
             )
             async with self.async_session() as session:
                 start = time.monotonic()
