@@ -302,3 +302,37 @@
   box-shadow: 0 0 0 2px #000;
   border-color: #000;
 }
+
+/* ===== Mobile Responsive (<768px) ===== */
+@media (max-width: 768px) {
+  /* Title area: stack vertically */
+  .flex.justify-between.items-center:has(h2) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  /* Batch actions bar: adapt to narrow screens */
+  #batch-actions {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    border-radius: 12px;
+    padding: 8px 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    bottom: 12px;
+  }
+
+  /* Checkbox: larger touch target */
+  .checkbox {
+    width: 18px;
+    height: 18px;
+  }
+
+  .checkbox:checked::after {
+    width: 4px;
+    height: 8px;
+  }
+}

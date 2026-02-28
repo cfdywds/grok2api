@@ -45,3 +45,17 @@
 .config-field-input {
   margin-top: 6px;
 }
+
+/* ===== Mobile Responsive (<768px) ===== */
+@media (max-width: 768px) {
+  /* Title area: stack vertically, save button full width */
+  .flex.justify-between.items-center:has(h2) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .flex.justify-between.items-center:has(h2) > .geist-button {
+    width: 100%;
+  }
+}

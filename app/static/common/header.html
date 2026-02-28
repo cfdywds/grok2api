@@ -11,8 +11,9 @@
           <span>Grok2API</span>
         </a>
       </div>
-      <div class="h-4 w-px bg-[var(--border)]"></div>
-      <div class="nav-group">
+      <!-- Desktop nav: hidden on mobile -->
+      <div class="h-4 w-px bg-[var(--border)] nav-desktop-only"></div>
+      <div class="nav-group nav-desktop-only">
         <button type="button" class="nav-link nav-group-trigger text-sm" aria-haspopup="true"
           aria-expanded="false">服务管理</button>
         <div class="nav-group-menu">
@@ -24,7 +25,7 @@
           <a href="/admin/prompts" class="nav-link text-sm" data-nav="/admin/prompts">提示词管理</a>
         </div>
       </div>
-      <div class="nav-group">
+      <div class="nav-group nav-desktop-only">
         <button type="button" class="nav-link nav-group-trigger text-sm" aria-haspopup="true"
           aria-expanded="false">功能玩法</button>
         <div class="nav-group-menu">
@@ -34,8 +35,39 @@
         </div>
       </div>
     </div>
-    <div class="nav-actions">
+    <!-- Desktop actions: hidden on mobile -->
+    <div class="nav-actions nav-desktop-only">
       <button id="storage-mode-btn" type="button" class="nav-action-btn" title="存储模式">-</button>
+      <a href="https://github.com/chenyme/grok2api/issues" target="_blank" rel="noopener"
+        class="nav-action-btn">反馈</a>
+      <button onclick="logout()" type="button" class="nav-action-btn">退出</button>
+    </div>
+    <!-- Hamburger button: visible on mobile only -->
+    <button type="button" id="nav-hamburger" class="nav-hamburger" aria-label="菜单" aria-expanded="false">
+      <span class="hamburger-line"></span>
+      <span class="hamburger-line"></span>
+      <span class="hamburger-line"></span>
+    </button>
+  </div>
+  <!-- Mobile dropdown menu -->
+  <div id="nav-mobile-menu" class="nav-mobile-menu">
+    <div class="nav-mobile-section">
+      <div class="nav-mobile-label">服务管理</div>
+      <a href="/admin/token" class="nav-mobile-link" data-nav="/admin/token">Token管理</a>
+      <a href="/admin/config" class="nav-mobile-link" data-nav="/admin/config">配置管理</a>
+      <a href="/admin/cache" class="nav-mobile-link" data-nav="/admin/cache">缓存管理</a>
+      <a href="/admin/gallery" class="nav-mobile-link" data-nav="/admin/gallery">图片管理</a>
+      <a href="/admin/gallery/random" class="nav-mobile-link" data-nav="/admin/gallery/random">随机查看</a>
+      <a href="/admin/prompts" class="nav-mobile-link" data-nav="/admin/prompts">提示词管理</a>
+    </div>
+    <div class="nav-mobile-section">
+      <div class="nav-mobile-label">功能玩法</div>
+      <a href="/admin/imagine" class="nav-mobile-link" data-nav="/admin/imagine">Imagine 瀑布流</a>
+      <a href="/admin/img2img" class="nav-mobile-link" data-nav="/admin/img2img">图生图</a>
+      <a href="/admin/voice" class="nav-mobile-link" data-nav="/admin/voice">Voice Live 陪聊</a>
+    </div>
+    <div class="nav-mobile-actions">
+      <button id="storage-mode-btn-mobile" type="button" class="nav-action-btn" title="存储模式">-</button>
       <a href="https://github.com/chenyme/grok2api/issues" target="_blank" rel="noopener"
         class="nav-action-btn">反馈</a>
       <button onclick="logout()" type="button" class="nav-action-btn">退出</button>
