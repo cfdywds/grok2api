@@ -1892,9 +1892,10 @@ async def admin_img2img(
     if edit_request.stream is None:
         edit_request.stream = False
 
-    response_format = resolve_response_format(edit_request.response_format)
+    # 管理后台始终使用 b64_json，图片由客户端本地存储管理，避免服务端磁盘残留
+    response_format = "b64_json"
     edit_request.response_format = response_format
-    response_field = response_field_name(response_format)
+    response_field = "b64_json"
 
     # 参数验证
     validate_edit_request(edit_request, image)

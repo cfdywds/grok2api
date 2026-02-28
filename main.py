@@ -5,9 +5,11 @@ FastAPI 应用初始化和路由注册
 """
 
 from contextlib import asynccontextmanager
+import asyncio
 import os
 import platform
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -68,6 +70,7 @@ async def lifespan(app: FastAPI):
         scheduler.start()
 
     logger.info("Application startup complete.")
+    asyncio.create_task(_cleanup_tmp_files())
     yield
 
     # 关闭
@@ -83,8 +86,34 @@ async def lifespan(app: FastAPI):
         scheduler.stop()
 
 
+async def _cleanup_tmp_files():
+    """定期清理 data/tmp 下超过 1 小时的缓存图片/视频，防止 Zeabur 等容器磁盘积累"""
+    from app.core.storage import DATA_DIR
+
+    dirs = [DATA_DIR / "tmp" / "image", DATA_DIR / "tmp" / "video"]
+    interval = 3600  # 每小时运行一次
+    ttl = 3600  # 超过 1 小时的文件删除
+
+    while True:
+        await asyncio.sleep(interval)
+        cutoff = time.time() - ttl
+        deleted = 0
+        for d in dirs:
+            if not d.exists():
+                continue
+            for f in d.glob("*"):
+                if f.is_file():
+                    try:
+                        if f.stat().st_mtime < cutoff:
+                            f.unlink()
+                            deleted += 1
+                    except Exception:
+                        pass
+        if deleted:
+            logger.info(f"Tmp cleanup: removed {deleted} file(s) older than {ttl}s")
+
+
 def create_app() -> FastAPI:
-    """创建 FastAPI 应用"""
     app = FastAPI(
         title="Grok2API",
         lifespan=lifespan,
