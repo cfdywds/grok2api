@@ -26,7 +26,7 @@ from app.core.config import get_config
 from app.core.exceptions import AppException, UpstreamException, ValidationException
 from app.core.logger import logger
 from app.core.storage import DATA_DIR
-from app.services.grok.utils.headers import apply_statsig, build_sso_cookie
+from app.services.grok.utils.headers import apply_statsig, build_sso_cookie, build_grok_headers
 from app.services.grok.utils.retry import retry_on_status
 from app.services.token.service import TokenService
 
@@ -164,17 +164,12 @@ class BaseService:
                 "Referer": referer,
                 "User-Agent": self.config.user_agent,
             }
+            headers["Cookie"] = build_sso_cookie(token)
         else:
-            headers = {
-                "Accept": "*/*",
-                "Content-Type": "application/json",
-                "Origin": "https://grok.com",
-                "Referer": referer,
-                "User-Agent": self.config.user_agent,
-            }
-            apply_statsig(headers)
+            # 使用完整浏览器指纹头（与 chat 请求保持一致，防止 WAF 拦截）
+            headers = build_grok_headers(token)
+            headers["Referer"] = referer
 
-        headers["Cookie"] = build_sso_cookie(token)
         return headers
 
     async def _get_session(self, reuse: bool = True) -> AsyncSession:
