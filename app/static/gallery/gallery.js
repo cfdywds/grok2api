@@ -323,7 +323,7 @@ async function deleteImages(imageIds) {
             }
         }
 
-        return { success: true };
+        return { success: true, message: `成功删除 ${toDeleteImages.length} 张图片` };
     } catch (error) {
         console.error('删除图片失败:', error);
         return null;
