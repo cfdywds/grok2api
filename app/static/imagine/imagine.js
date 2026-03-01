@@ -7,6 +7,8 @@
   const concurrentSelect = document.getElementById('concurrentSelect');
   const autoScrollToggle = document.getElementById('autoScrollToggle');
   const autoDownloadToggle = document.getElementById('autoDownloadToggle');
+  const newestFirstToggle = document.getElementById('newestFirstToggle');
+  const autoFilterToggle = document.getElementById('autoFilterToggle');
   const selectFolderBtn = document.getElementById('selectFolderBtn');
   const folderPath = document.getElementById('folderPath');
   const statusText = document.getElementById('statusText');
@@ -16,6 +18,7 @@
   const modeButtons = document.querySelectorAll('.mode-btn');
   const waterfall = document.getElementById('waterfall');
   const emptyState = document.getElementById('emptyState');
+  const genLimitInput = document.getElementById('genLimitInput');
   const lightbox = document.getElementById('lightbox');
   const lightboxImg = document.getElementById('lightboxImg');
   const closeLightbox = document.getElementById('closeLightbox');
@@ -43,6 +46,12 @@
     }
   }
 
+  function getGenLimit() {
+    if (!genLimitInput) return 0;
+    const val = parseInt(genLimitInput.value, 10);
+    return (Number.isFinite(val) && val > 0) ? val : 0;
+  }
+
   function setStatus(state, text) {
     if (!statusText) return;
     statusText.textContent = text;
@@ -66,7 +75,8 @@
 
   function updateCount(value) {
     if (countValue) {
-      countValue.textContent = String(value);
+      const limit = getGenLimit();
+      countValue.textContent = limit > 0 ? `${value} / ${limit}` : String(value);
     }
   }
 
@@ -150,13 +160,14 @@
   }
 
   async function createImagineTask(prompt, ratio, apiKey) {
+    const autoFilter = !!(autoFilterToggle && autoFilterToggle.checked);
     const res = await fetch('/api/v1/admin/imagine/start', {
       method: 'POST',
       headers: {
         ...buildAuthHeaders(apiKey),
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ prompt, aspect_ratio: ratio })
+      body: JSON.stringify({ prompt, aspect_ratio: ratio, auto_filter: autoFilter })
     });
     if (!res.ok) {
       const text = await res.text();
@@ -263,7 +274,11 @@
     left.textContent = meta && meta.sequence ? `#${meta.sequence}` : '#';
     const right = document.createElement('span');
     if (meta && meta.elapsed_ms) {
-      right.textContent = `${meta.elapsed_ms}ms`;
+      const parts = [`${meta.elapsed_ms}ms`];
+      if (meta.quality_score != null && meta.quality_score >= 0) {
+        parts.push(`Q:${meta.quality_score}`);
+      }
+      right.textContent = parts.join(' · ');
     } else {
       right.textContent = '';
     }
@@ -282,10 +297,19 @@
       item.classList.add('selection-mode');
     }
     
-    waterfall.appendChild(item);
+    const newestFirst = newestFirstToggle && newestFirstToggle.checked;
+    if (newestFirst) {
+      waterfall.prepend(item);
+    } else {
+      waterfall.appendChild(item);
+    }
 
     if (autoScrollToggle && autoScrollToggle.checked) {
-      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      if (newestFirst) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }
     }
 
     // 始终保存到工作目录（不依赖"自动下载"开关）
@@ -338,6 +362,13 @@
       updateLatency(data.elapsed_ms);
       updateError('');
       appendImage(data.b64_json, data);
+
+      const limit = getGenLimit();
+      if (limit > 0 && imageCount >= limit) {
+        toast(`已达到目标数量 ${limit}，自动停止`, 'success');
+        stopConnection();
+        return;
+      }
     } else if (data.type === 'status') {
       if (data.status === 'running') {
         setStatus('connected', '生成中');
@@ -457,6 +488,8 @@
     isRunning = true;
     setStatus('connecting', '连接中');
     startBtn.disabled = true;
+    if (genLimitInput) genLimitInput.disabled = true;
+    if (autoFilterToggle) autoFilterToggle.disabled = true;
 
     if (pendingFallbackTimer) {
       clearTimeout(pendingFallbackTimer);
@@ -562,7 +595,8 @@
     const payload = {
       type: 'start',
       prompt,
-      aspect_ratio: ratio
+      aspect_ratio: ratio,
+      auto_filter: !!(autoFilterToggle && autoFilterToggle.checked),
     };
     ws.send(JSON.stringify(payload));
     updateError('');
@@ -582,6 +616,8 @@
     stopAllConnections();
     currentTaskIds = [];
     isRunning = false;
+    if (genLimitInput) genLimitInput.disabled = false;
+    if (autoFilterToggle) autoFilterToggle.disabled = false;
     updateActive();
     updateModeValue();
     setButtons(false);

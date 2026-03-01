@@ -45,6 +45,66 @@ from app.services.token import EffortType
 TEMPLATE_DIR = Path(__file__).parent.parent.parent / "static"
 
 
+# ── 内存图片质量分析（不依赖文件 I/O）────────────────────────────────────────
+
+_QUALITY_FILTER_THRESHOLD = 40
+
+
+def _analyze_quality_from_base64(b64_data: str) -> dict:
+    """
+    从 base64 数据在内存中分析图片质量。
+    使用 OpenCV 基础分析：模糊度、亮度、对比度。
+    返回 {"quality_score": float, ...}
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        raw = base64.b64decode(b64_data)
+        nparr = np.frombuffer(raw, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return {"quality_score": 0}
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # 模糊度
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        if laplacian_var < 50:
+            blur_score = laplacian_var / 50 * 40
+        elif laplacian_var < 200:
+            blur_score = 40 + (laplacian_var - 50) / 150 * 40
+        else:
+            blur_score = 80 + min(20, (laplacian_var - 200) / 100 * 20)
+        blur_score = max(0, min(100, blur_score))
+
+        # 亮度
+        brightness = float(np.mean(gray))
+        brightness_score = brightness / 255 * 100
+
+        # 对比度
+        contrast = float(gray.std())
+        if contrast < 20:
+            contrast_score = contrast / 20 * 50
+        elif contrast < 50:
+            contrast_score = 50 + (contrast - 20) / 30 * 30
+        else:
+            contrast_score = 80 + min(20, (contrast - 50) / 30 * 20)
+        contrast_score = max(0, min(100, contrast_score))
+
+        quality_score = (
+            blur_score * 0.5
+            + contrast_score * 0.3
+            + (100 - abs(brightness_score - 50) * 1.5) * 0.2
+        )
+        quality_score = max(0, min(100, quality_score))
+
+        return {"quality_score": round(quality_score, 1)}
+    except Exception as e:
+        logger.warning(f"内存图片质量分析失败: {e}")
+        return {"quality_score": -1}
+
+
 router = APIRouter()
 
 IMAGINE_SESSION_TTL = 600
@@ -62,7 +122,9 @@ async def _cleanup_imagine_sessions(now: float) -> None:
         _IMAGINE_SESSIONS.pop(key, None)
 
 
-async def _create_imagine_session(prompt: str, aspect_ratio: str) -> str:
+async def _create_imagine_session(
+    prompt: str, aspect_ratio: str, auto_filter: bool = False
+) -> str:
     task_id = uuid.uuid4().hex
     now = time.time()
     async with _IMAGINE_SESSIONS_LOCK:
@@ -70,6 +132,7 @@ async def _create_imagine_session(prompt: str, aspect_ratio: str) -> str:
         _IMAGINE_SESSIONS[task_id] = {
             "prompt": prompt,
             "aspect_ratio": aspect_ratio,
+            "auto_filter": auto_filter,
             "created_at": now,
         }
     return task_id
@@ -390,7 +453,7 @@ async def admin_imagine_ws(websocket: WebSocket):
         run_task = None
         stop_event.clear()
 
-    async def _run(prompt: str, aspect_ratio: str):
+    async def _run(prompt: str, aspect_ratio: str, auto_filter: bool = False):
         model_id = "grok-imagine-1.0"
         model_info = ModelService.get(model_id)
         if not model_info or not model_info.is_image:
@@ -462,18 +525,32 @@ async def admin_imagine_ws(websocket: WebSocket):
                 if images and all(img and img != "error" for img in images):
                     # 一次发送所有 6 张图片
                     for img_b64 in images:
+                        # 质量过滤
+                        score = None
+                        if auto_filter:
+                            result = await asyncio.to_thread(
+                                _analyze_quality_from_base64, img_b64
+                            )
+                            score = result.get("quality_score", -1)
+                            if 0 <= score < _QUALITY_FILTER_THRESHOLD:
+                                logger.info(
+                                    f"Image filtered: score={score} < {_QUALITY_FILTER_THRESHOLD}"
+                                )
+                                continue
+
                         sequence += 1
-                        await _send(
-                            {
-                                "type": "image",
-                                "b64_json": img_b64,
-                                "sequence": sequence,
-                                "created_at": int(time.time() * 1000),
-                                "elapsed_ms": elapsed_ms,
-                                "aspect_ratio": aspect_ratio,
-                                "run_id": run_id,
-                            }
-                        )
+                        msg = {
+                            "type": "image",
+                            "b64_json": img_b64,
+                            "sequence": sequence,
+                            "created_at": int(time.time() * 1000),
+                            "elapsed_ms": elapsed_ms,
+                            "aspect_ratio": aspect_ratio,
+                            "run_id": run_id,
+                        }
+                        if score is not None:
+                            msg["quality_score"] = score
+                        await _send(msg)
 
                     # 图片已由客户端本地存储，服务端不再保存
 
@@ -547,9 +624,10 @@ async def admin_imagine_ws(websocket: WebSocket):
                 if not ratio:
                     ratio = "2:3"
                 ratio = resolve_aspect_ratio(ratio)
+                auto_filter = bool(payload.get("auto_filter", False))
                 await _stop_run()
                 stop_event.clear()
-                run_task = asyncio.create_task(_run(prompt, ratio))
+                run_task = asyncio.create_task(_run(prompt, ratio, auto_filter))
             elif msg_type == "stop":
                 await _stop_run()
             elif msg_type == "ping":
@@ -582,6 +660,7 @@ async def admin_imagine_ws(websocket: WebSocket):
 class ImagineStartRequest(BaseModel):
     prompt: str
     aspect_ratio: Optional[str] = "2:3"
+    auto_filter: Optional[bool] = False
 
 
 @router.post("/api/v1/admin/imagine/start", dependencies=[Depends(verify_api_key)])
@@ -590,7 +669,7 @@ async def admin_imagine_start(data: ImagineStartRequest):
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt cannot be empty")
     ratio = resolve_aspect_ratio(str(data.aspect_ratio or "2:3").strip() or "2:3")
-    task_id = await _create_imagine_session(prompt, ratio)
+    task_id = await _create_imagine_session(prompt, ratio, bool(data.auto_filter))
     return {"task_id": task_id, "aspect_ratio": ratio}
 
 
@@ -623,11 +702,13 @@ async def admin_imagine_sse(
     if session:
         prompt = str(session.get("prompt") or "").strip()
         ratio = str(session.get("aspect_ratio") or "2:3").strip() or "2:3"
+        sse_auto_filter = bool(session.get("auto_filter", False))
     else:
         prompt = (prompt or "").strip()
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt cannot be empty")
         ratio = str(aspect_ratio or "2:3").strip() or "2:3"
+        sse_auto_filter = False
         ratio = resolve_aspect_ratio(ratio)
 
     async def event_stream():
@@ -709,18 +790,32 @@ async def admin_imagine_sse(
 
                     if images and all(img and img != "error" for img in images):
                         for img_b64 in images:
+                            # 质量过滤
+                            score = None
+                            if sse_auto_filter:
+                                result = await asyncio.to_thread(
+                                    _analyze_quality_from_base64, img_b64
+                                )
+                                score = result.get("quality_score", -1)
+                                if 0 <= score < _QUALITY_FILTER_THRESHOLD:
+                                    logger.info(
+                                        f"SSE image filtered: score={score} < {_QUALITY_FILTER_THRESHOLD}"
+                                    )
+                                    continue
+
                             sequence += 1
-                            yield _sse_event(
-                                {
-                                    "type": "image",
-                                    "b64_json": img_b64,
-                                    "sequence": sequence,
-                                    "created_at": int(time.time() * 1000),
-                                    "elapsed_ms": elapsed_ms,
-                                    "aspect_ratio": ratio,
-                                    "run_id": run_id,
-                                }
-                            )
+                            msg = {
+                                "type": "image",
+                                "b64_json": img_b64,
+                                "sequence": sequence,
+                                "created_at": int(time.time() * 1000),
+                                "elapsed_ms": elapsed_ms,
+                                "aspect_ratio": ratio,
+                                "run_id": run_id,
+                            }
+                            if score is not None:
+                                msg["quality_score"] = score
+                            yield _sse_event(msg)
 
                         try:
                             effort = (

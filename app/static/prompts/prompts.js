@@ -1,5 +1,8 @@
 // 提示词管理 JavaScript
 
+// Workspace 模式标志
+let _useWorkspace = false;
+
 // 状态管理
 const state = {
   prompts: [],
@@ -19,6 +22,7 @@ const elements = {
   promptsList: null,
   emptyState: null,
   totalCount: null,
+  storageMode: null,
   searchInput: null,
   categoryFilter: null,
   tagFilter: null,
@@ -30,12 +34,20 @@ const elements = {
   importDialog: null,
 };
 
+// 生成简易 UUID
+function _genId() {
+  return 'xxxx-xxxx-xxxx'.replace(/x/g, () =>
+    ((Math.random() * 16) | 0).toString(16)
+  );
+}
+
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
   // 获取 DOM 元素
   elements.promptsList = document.getElementById('prompts-list');
   elements.emptyState = document.getElementById('empty-state');
   elements.totalCount = document.getElementById('total-count');
+  elements.storageMode = document.getElementById('storage-mode');
   elements.searchInput = document.getElementById('search-input');
   elements.categoryFilter = document.getElementById('category-filter');
   elements.tagFilter = document.getElementById('tag-filter');
@@ -49,9 +61,87 @@ document.addEventListener('DOMContentLoaded', () => {
   // 绑定事件
   bindEvents();
 
-  // 加载提示词列表
-  loadPrompts();
+  // 初始化 workspace（异步），完成后加载数据
+  _initWorkspaceMode().then(() => loadPrompts());
 });
+
+// Workspace 初始化
+async function _initWorkspaceMode() {
+  const banner = document.getElementById('workspace-banner');
+  const bannerBtn = document.getElementById('workspace-banner-btn');
+
+  if (typeof Workspace === 'undefined' || !Workspace.isSupported()) {
+    // 不支持 File System Access API，隐藏 banner，服务器模式
+    if (banner) banner.style.display = 'none';
+    _setStorageIndicator(false);
+    return;
+  }
+
+  const handle = await Workspace.initWorkspace();
+  if (handle && Workspace.getHandle()) {
+    // 已有权限的 workspace
+    _useWorkspace = true;
+    if (banner) banner.style.display = 'none';
+    _setStorageIndicator(true);
+    return;
+  }
+
+  if (handle) {
+    // 有 handle 但权限未就绪，显示 banner 提示用户点击授权
+    if (banner) {
+      banner.style.display = 'flex';
+      banner.querySelector('span').textContent = '📁 检测到工作目录，点击授权以使用本地存储。';
+      if (bannerBtn) {
+        bannerBtn.textContent = '授权访问';
+        bannerBtn.onclick = async () => {
+          const ok = await Workspace.resumePermission();
+          if (ok) {
+            _useWorkspace = true;
+            banner.style.display = 'none';
+            _setStorageIndicator(true);
+            loadPrompts();
+          } else {
+            showToast('授权失败，将使用服务器存储', 'error');
+          }
+        };
+      }
+    }
+    _setStorageIndicator(false);
+    return;
+  }
+
+  // 无 handle，显示设置 banner
+  if (banner) {
+    banner.style.display = 'flex';
+    if (bannerBtn) {
+      bannerBtn.onclick = async () => {
+        try {
+          await Workspace.requestWorkspace();
+          _useWorkspace = true;
+          banner.style.display = 'none';
+          _setStorageIndicator(true);
+          loadPrompts();
+        } catch (e) {
+          console.warn('[prompts] requestWorkspace error:', e);
+        }
+      };
+    }
+  }
+  _setStorageIndicator(false);
+}
+
+// 更新存储模式指示器
+function _setStorageIndicator(isLocal) {
+  if (!elements.storageMode) return;
+  elements.storageMode.style.display = 'inline-block';
+  if (isLocal) {
+    elements.storageMode.textContent = '\uD83D\uDCC2 本地存储';
+    elements.storageMode.style.color = '#059669';
+  } else {
+    elements.storageMode.textContent = '\u2601\uFE0F 服务器存储';
+    elements.storageMode.style.color = '#6b7280';
+  }
+}
 
 // 绑定事件
 function bindEvents() {
@@ -85,18 +175,48 @@ function bindEvents() {
 // 加载提示词列表
 async function loadPrompts() {
   try {
-    const params = new URLSearchParams();
-    if (state.filters.search) params.append('search', state.filters.search);
-    if (state.filters.category) params.append('category', state.filters.category);
-    if (state.filters.tag) params.append('tag', state.filters.tag);
-    if (state.filters.favorite) params.append('favorite', 'true');
+    if (_useWorkspace) {
+      const data = await Workspace.readPrompts();
+      let prompts = data.prompts || [];
 
-    const response = await fetch(`/api/v1/admin/prompts/list?${params}`);
-    const data = await response.json();
+      // 客户端筛选
+      if (state.filters.search) {
+        const q = state.filters.search.toLowerCase();
+        prompts = prompts.filter(p =>
+          (p.title || '').toLowerCase().includes(q) ||
+          (p.content || '').toLowerCase().includes(q)
+        );
+      }
+      if (state.filters.category) {
+        prompts = prompts.filter(p => p.category === state.filters.category);
+      }
+      if (state.filters.tag) {
+        prompts = prompts.filter(p => (p.tags || []).includes(state.filters.tag));
+      }
+      if (state.filters.favorite) {
+        prompts = prompts.filter(p => p.favorite);
+      }
 
-    state.prompts = data.prompts || [];
-    state.categories = data.categories || [];
-    state.tags = data.tags || [];
+      state.prompts = prompts;
+
+      // 从全量数据中提取分类和标签
+      const allPrompts = data.prompts || [];
+      state.categories = [...new Set(allPrompts.map(p => p.category).filter(Boolean))];
+      state.tags = [...new Set(allPrompts.flatMap(p => p.tags || []).filter(Boolean))];
+    } else {
+      const params = new URLSearchParams();
+      if (state.filters.search) params.append('search', state.filters.search);
+      if (state.filters.category) params.append('category', state.filters.category);
+      if (state.filters.tag) params.append('tag', state.filters.tag);
+      if (state.filters.favorite) params.append('favorite', 'true');
+
+      const response = await fetch(`/api/v1/admin/prompts/list?${params}`);
+      const data = await response.json();
+
+      state.prompts = data.prompts || [];
+      state.categories = data.categories || [];
+      state.tags = data.tags || [];
+    }
 
     updateUI();
   } catch (error) {
@@ -208,7 +328,7 @@ function createPromptCard(prompt) {
   categoryBadge.textContent = prompt.category;
   meta.appendChild(categoryBadge);
 
-  prompt.tags.forEach(tag => {
+  (prompt.tags || []).forEach(tag => {
     const tagBadge = document.createElement('span');
     tagBadge.className = 'tag-badge';
     tagBadge.textContent = tag;
@@ -221,7 +341,7 @@ function createPromptCard(prompt) {
 
   const useCount = document.createElement('span');
   useCount.className = 'use-count';
-  useCount.textContent = `使用 ${prompt.use_count} 次`;
+  useCount.textContent = `使用 ${prompt.use_count || 0} 次`;
 
   const actions = document.createElement('div');
   actions.className = 'prompt-actions';
@@ -293,7 +413,7 @@ function openDialog(prompt = null) {
     titleInput.value = prompt.title;
     contentInput.value = prompt.content;
     categoryInput.value = prompt.category;
-    tagsInput.value = prompt.tags.join(', ');
+    tagsInput.value = (prompt.tags || []).join(', ');
   } else {
     dialogTitle.textContent = '添加提示词';
     titleInput.value = '';
@@ -330,29 +450,52 @@ async function savePrompt() {
   }
 
   try {
-    let response;
-    if (state.currentPrompt) {
-      // 更新
-      response = await fetch(`/api/v1/admin/prompts/${state.currentPrompt.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content, category, tags }),
-      });
-    } else {
-      // 创建
-      response = await fetch('/api/v1/admin/prompts/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content, category, tags }),
-      });
-    }
-
-    if (response.ok) {
+    if (_useWorkspace) {
+      const now = new Date().toISOString();
+      if (state.currentPrompt) {
+        await Workspace.updatePrompt(state.currentPrompt.id, {
+          title, content, category, tags, updated_at: now,
+        });
+      } else {
+        const entry = {
+          id: _genId(),
+          title,
+          content,
+          category,
+          tags,
+          favorite: false,
+          use_count: 0,
+          created_at: now,
+          updated_at: now,
+        };
+        await Workspace.addPrompt(entry);
+      }
       showToast(state.currentPrompt ? '更新成功' : '添加成功', 'success');
       closeDialog();
       loadPrompts();
     } else {
-      throw new Error('保存失败');
+      let response;
+      if (state.currentPrompt) {
+        response = await fetch(`/api/v1/admin/prompts/${state.currentPrompt.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, content, category, tags }),
+        });
+      } else {
+        response = await fetch('/api/v1/admin/prompts/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, content, category, tags }),
+        });
+      }
+
+      if (response.ok) {
+        showToast(state.currentPrompt ? '更新成功' : '添加成功', 'success');
+        closeDialog();
+        loadPrompts();
+      } else {
+        throw new Error('保存失败');
+      }
     }
   } catch (error) {
     console.error('保存提示词失败:', error);
@@ -366,15 +509,21 @@ async function toggleFavorite(promptId) {
     const prompt = state.prompts.find(p => p.id === promptId);
     if (!prompt) return;
 
-    const response = await fetch(`/api/v1/admin/prompts/${promptId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ favorite: !prompt.favorite }),
-    });
-
-    if (response.ok) {
+    if (_useWorkspace) {
+      await Workspace.updatePrompt(promptId, { favorite: !prompt.favorite });
       showToast(prompt.favorite ? '已取消收藏' : '已收藏', 'success');
       loadPrompts();
+    } else {
+      const response = await fetch(`/api/v1/admin/prompts/${promptId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ favorite: !prompt.favorite }),
+      });
+
+      if (response.ok) {
+        showToast(prompt.favorite ? '已取消收藏' : '已收藏', 'success');
+        loadPrompts();
+      }
     }
   } catch (error) {
     console.error('切换收藏失败:', error);
@@ -389,7 +538,13 @@ async function copyPrompt(prompt) {
     showToast('已复制到剪贴板', 'success');
 
     // 增加使用次数
-    await fetch(`/api/v1/admin/prompts/${prompt.id}/use`, { method: 'POST' });
+    if (_useWorkspace) {
+      await Workspace.updatePrompt(prompt.id, {
+        use_count: (prompt.use_count || 0) + 1,
+      });
+    } else {
+      await fetch(`/api/v1/admin/prompts/${prompt.id}/use`, { method: 'POST' });
+    }
     loadPrompts();
   } catch (error) {
     console.error('复制失败:', error);
@@ -410,15 +565,21 @@ async function deletePrompt(promptId) {
   if (!confirmed) return;
 
   try {
-    const response = await fetch('/api/v1/admin/prompts/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([promptId]),
-    });
-
-    if (response.ok) {
+    if (_useWorkspace) {
+      await Workspace.removePrompt(promptId);
       showToast('删除成功', 'success');
       loadPrompts();
+    } else {
+      const response = await fetch('/api/v1/admin/prompts/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([promptId]),
+      });
+
+      if (response.ok) {
+        showToast('删除成功', 'success');
+        loadPrompts();
+      }
     }
   } catch (error) {
     console.error('删除失败:', error);
@@ -460,19 +621,67 @@ async function importPrompts() {
   try {
     const file = fileInput.files[0];
     const text = await file.text();
-    const data = JSON.parse(text);
+    const importData = JSON.parse(text);
 
-    const response = await fetch(`/api/v1/admin/prompts/import?merge=${merge}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
+    if (_useWorkspace) {
+      // 从导入数据中提取 prompts 数组
+      const incoming = Array.isArray(importData)
+        ? importData
+        : (importData.prompts || []);
 
-    const result = await response.json();
-    if (result.success) {
-      showToast(result.message, 'success');
+      if (merge) {
+        // 合并模式：保留现有，追加不重复的
+        const existing = await Workspace.readPrompts();
+        const existingIds = new Set((existing.prompts || []).map(p => p.id));
+        const now = new Date().toISOString();
+        const newEntries = incoming
+          .filter(p => !existingIds.has(p.id))
+          .map(p => ({
+            id: p.id || _genId(),
+            title: p.title || '',
+            content: p.content || '',
+            category: p.category || '默认',
+            tags: p.tags || [],
+            favorite: p.favorite || false,
+            use_count: p.use_count || 0,
+            created_at: p.created_at || now,
+            updated_at: p.updated_at || now,
+          }));
+        existing.prompts = [...newEntries, ...existing.prompts];
+        await Workspace.writePrompts(existing);
+        showToast(`已导入 ${newEntries.length} 条提示词（合并模式）`, 'success');
+      } else {
+        // 覆盖模式
+        const now = new Date().toISOString();
+        const entries = incoming.map(p => ({
+          id: p.id || _genId(),
+          title: p.title || '',
+          content: p.content || '',
+          category: p.category || '默认',
+          tags: p.tags || [],
+          favorite: p.favorite || false,
+          use_count: p.use_count || 0,
+          created_at: p.created_at || now,
+          updated_at: p.updated_at || now,
+        }));
+        await Workspace.writePrompts({ version: '1.0', prompts: entries });
+        showToast(`已导入 ${entries.length} 条提示词（覆盖模式）`, 'success');
+      }
       closeImportDialog();
       loadPrompts();
+    } else {
+      const response = await fetch(`/api/v1/admin/prompts/import?merge=${merge}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(importData),
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        showToast(result.message, 'success');
+        closeImportDialog();
+        loadPrompts();
+      }
     }
   } catch (error) {
     console.error('导入失败:', error);
@@ -483,8 +692,13 @@ async function importPrompts() {
 // 导出提示词
 async function exportPrompts() {
   try {
-    const response = await fetch('/api/v1/admin/prompts/export/all');
-    const data = await response.json();
+    let data;
+    if (_useWorkspace) {
+      data = await Workspace.readPrompts();
+    } else {
+      const response = await fetch('/api/v1/admin/prompts/export/all');
+      data = await response.json();
+    }
 
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -499,32 +713,6 @@ async function exportPrompts() {
     console.error('导出失败:', error);
     showToast('导出失败', 'error');
   }
-}
-
-// 显示 Toast 通知
-function showToast(message, type = 'info') {
-  const container = document.getElementById('toast-container');
-
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-
-  const iconSvg = {
-    success: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>',
-    error: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>',
-    info: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>',
-  };
-
-  toast.innerHTML = `
-    ${iconSvg[type] || iconSvg.info}
-    <div class="toast-message">${message}</div>
-  `;
-
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.animation = 'slideIn 0.3s ease-out reverse';
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
 }
 
 // 防抖函数

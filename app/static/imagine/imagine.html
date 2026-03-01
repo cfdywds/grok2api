@@ -86,6 +86,10 @@
                       <option value="3">3 个任务</option>
                     </select>
                   </div>
+                  <div>
+                    <label class="field-label" for="genLimitInput">生成数量</label>
+                    <input id="genLimitInput" type="number" class="geist-input" min="0" step="1" value="0" placeholder="0 = 无限制">
+                  </div>
                 </div>
               </div>
               
@@ -105,6 +109,22 @@
                       <input id="autoDownloadToggle" type="checkbox">
                       <span class="toggle-track"></span>
                       <span class="toggle-label">自动保存图片</span>
+                    </label>
+                  </div>
+                  <div class="settings-toggle">
+                    <label class="field-label" for="newestFirstToggle">最新在前</label>
+                    <label class="toggle">
+                      <input id="newestFirstToggle" type="checkbox">
+                      <span class="toggle-track"></span>
+                      <span class="toggle-label">新图显示在上方</span>
+                    </label>
+                  </div>
+                  <div class="settings-toggle">
+                    <label class="field-label" for="autoFilterToggle">质量过滤</label>
+                    <label class="toggle">
+                      <input id="autoFilterToggle" type="checkbox">
+                      <span class="toggle-track"></span>
+                      <span class="toggle-label">自动过滤低质量</span>
                     </label>
                   </div>
                 </div>

@@ -526,3 +526,26 @@
     max-height: 95vh;
   }
 }
+
+/* Workspace Banner */
+.workspace-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 8px;
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+  font-size: 0.875rem;
+  color: #92400e;
+}
+
+/* Storage Mode Badge */
+.storage-mode-badge {
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #f3f4f6;
+}

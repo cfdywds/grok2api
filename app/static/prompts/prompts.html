@@ -7,6 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="/static/common/common.css">
   <link rel="stylesheet" href="/static/common/dialog.css">
+  <link rel="stylesheet" href="/static/common/toast.css">
   <link rel="stylesheet" href="/static/prompts/prompts.css">
 </head>
 <body>
@@ -24,6 +25,7 @@
         <h1 class="page-title">提示词管理</h1>
         <div class="stats">
           <span id="total-count">总计: 0</span>
+          <span id="storage-mode" class="storage-mode-badge" style="display:none;"></span>
         </div>
       </div>
       <div class="right-section">
@@ -51,6 +53,12 @@
           导出
         </button>
       </div>
+    </div>
+
+    <!-- 工作目录提示条 -->
+    <div id="workspace-banner" style="display:none;" class="workspace-banner">
+      <span>📁 尚未设置本地工作目录，提示词将保存在服务器端。</span>
+      <button id="workspace-banner-btn" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;">设置工作目录</button>
     </div>
 
     <!-- 筛选栏 -->
@@ -153,6 +161,8 @@
   </div>
 
   <script src="/static/common/dialog.js"></script>
+  <script src="/static/common/toast.js"></script>
+  <script src="/static/common/workspace.js"></script>
   <script src="/static/prompts/prompts.js"></script>
   <script src="/static/common/admin-auth.js?v=3"></script>
   <script src="/static/common/header.js?v=5"></script>

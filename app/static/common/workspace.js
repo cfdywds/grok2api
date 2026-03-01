@@ -273,6 +273,71 @@ const _WS = (() => {
     }
   }
 
+  // ── 提示词 I/O ────────────────────────────────────────────────────────────
+
+  const PROMPTS_FILE = 'prompts.json';
+
+  /**
+   * 读取 prompts.json，返回解析后的对象
+   * @returns {{ version: string, prompts: Array }}
+   */
+  async function readPrompts() {
+    if (!_dirHandle) return { version: '1.0', prompts: [] };
+    try {
+      const fh = await _dirHandle.getFileHandle(PROMPTS_FILE);
+      const file = await fh.getFile();
+      return JSON.parse(await file.text());
+    } catch (e) {
+      return { version: '1.0', prompts: [] };
+    }
+  }
+
+  /**
+   * 写入 prompts.json
+   * @param {{ version: string, prompts: Array }} data
+   */
+  async function writePrompts(data) {
+    if (!_dirHandle) throw new Error('workspace not set');
+    const fh = await _dirHandle.getFileHandle(PROMPTS_FILE, { create: true });
+    const writable = await fh.createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
+    await writable.close();
+  }
+
+  /**
+   * 追加一条提示词（prepend，保持最新在前）
+   * @param {object} entry
+   */
+  async function addPrompt(entry) {
+    const data = await readPrompts();
+    data.prompts.unshift(entry);
+    await writePrompts(data);
+  }
+
+  /**
+   * 更新指定 id 的提示词字段
+   * @param {string} id
+   * @param {object} patch 要更新的字段
+   */
+  async function updatePrompt(id, patch) {
+    const data = await readPrompts();
+    const idx = data.prompts.findIndex(p => p.id === id);
+    if (idx >= 0) {
+      data.prompts[idx] = { ...data.prompts[idx], ...patch };
+      await writePrompts(data);
+    }
+  }
+
+  /**
+   * 删除指定 id 的提示词
+   * @param {string} id
+   */
+  async function removePrompt(id) {
+    const data = await readPrompts();
+    data.prompts = data.prompts.filter(p => p.id !== id);
+    await writePrompts(data);
+  }
+
   return {
     initWorkspace,
     requestWorkspace,
@@ -290,6 +355,11 @@ const _WS = (() => {
     getImageURL,
     fileExists,
     deleteImage,
+    readPrompts,
+    writePrompts,
+    addPrompt,
+    updatePrompt,
+    removePrompt,
   };
 })();
 
