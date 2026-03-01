@@ -29,3 +29,35 @@ def build_sso_cookie(token: str, include_rw: bool = False) -> str:
 def apply_statsig(headers: Dict[str, str]) -> None:
     headers["x-statsig-id"] = StatsigService.gen_id()
     headers["x-xai-request-id"] = str(uuid.uuid4())
+
+
+def build_grok_headers(token: str) -> Dict[str, str]:
+    """Build full browser-like headers for Grok API requests."""
+    user_agent = get_config("security.user_agent")
+    headers = {
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Baggage": "sentry-environment=production,sentry-release=d6add6fb0460641fd482d767a335ef72b9b6abb8,sentry-public_key=b311e0f2690c81f25e2c4cf6d4f7ce1c",
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json",
+        "Origin": "https://grok.com",
+        "Pragma": "no-cache",
+        "Priority": "u=1, i",
+        "Referer": "https://grok.com/",
+        "Sec-Ch-Ua": '"Google Chrome";v="136", "Chromium";v="136", "Not(A:Brand";v="24"',
+        "Sec-Ch-Ua-Arch": "arm",
+        "Sec-Ch-Ua-Bitness": "64",
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Model": "",
+        "Sec-Ch-Ua-Platform": '"macOS"',
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "User-Agent": user_agent,
+    }
+
+    apply_statsig(headers)
+    headers["Cookie"] = build_sso_cookie(token)
+
+    return headers

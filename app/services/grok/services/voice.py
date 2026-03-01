@@ -10,7 +10,7 @@ from curl_cffi.requests import AsyncSession
 from app.core.logger import logger
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException
-from app.services.grok.utils.headers import apply_statsig, build_sso_cookie
+from app.services.grok.utils.headers import build_grok_headers
 
 LIVEKIT_TOKEN_API = "https://grok.com/rest/livekit/tokens"
 
@@ -77,18 +77,7 @@ class VoiceService:
             raise UpstreamException(f"Voice service error: {str(e)}")
 
     def _build_headers(self, token: str) -> Dict[str, str]:
-        headers = {
-            "Accept": "*/*",
-            "Content-Type": "application/json",
-            "Origin": "https://grok.com",
-            "Referer": "https://grok.com/",
-            # Statsig ID is crucial
-        }
-
-        apply_statsig(headers)
-        headers["Cookie"] = build_sso_cookie(token)
-
-        return headers
+        return build_grok_headers(token)
 
     def _build_payload(
         self,

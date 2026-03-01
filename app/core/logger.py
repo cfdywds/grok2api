@@ -125,7 +125,10 @@ def setup_logging(
             max_bytes = int(os.getenv("LOG_MAX_KB", "100")) * 1024  # 默认 100 KB ≈ 500 行
 
             def _json_formatter(record) -> str:
-                return _format_json(record) + "\n"
+                json_str = _format_json(record)
+                # Loguru 会对 format 返回值执行 str.format_map()，
+                # JSON 中的花括号必须转义，否则会被当作占位符解析
+                return json_str.replace("{", "{{").replace("}", "}}") + "\n"
 
             logger.add(
                 str(LOG_DIR / "app_{time:YYYY-MM-DD}.log"),
