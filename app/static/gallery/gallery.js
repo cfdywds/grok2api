@@ -308,8 +308,21 @@ async function deleteImages(imageIds) {
         if (!window.Workspace || !Workspace.getHandle()) return null;
         const meta = await Workspace.readMetadata();
         const toDelete = new Set(imageIds);
+
+        // 找出要删除的图片记录，保留文件名以便后续删除文件
+        const toDeleteImages = (meta.images || []).filter(img => toDelete.has(img.id));
+
+        // 更新元数据，移除已删除的记录
         meta.images = (meta.images || []).filter(img => !toDelete.has(img.id));
         await Workspace.writeMetadata(meta);
+
+        // 删除实际图片文件
+        for (const img of toDeleteImages) {
+            if (img.filename) {
+                await Workspace.deleteImage(img.filename);
+            }
+        }
+
         return { success: true };
     } catch (error) {
         console.error('删除图片失败:', error);
