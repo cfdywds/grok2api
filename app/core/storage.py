@@ -719,13 +719,13 @@ class SQLStorage(BaseStorage):
         # 容器环境下优先 IPv4、回退 IPv6 解析，避免路由不可达
         resolved_url, _ = self._resolve_ip(url)
 
-        # 配置 robust 的连接池
+        # 配置精简的连接池（Zeabur 等容器环境内存优化）
         self.engine = create_async_engine(
             resolved_url,
             echo=False,
-            pool_size=5,
-            max_overflow=5,
-            pool_recycle=300,
+            pool_size=2,
+            max_overflow=3,
+            pool_recycle=1800,
             pool_pre_ping=True,
         )
         self.async_session = async_sessionmaker(self.engine, expire_on_commit=False)

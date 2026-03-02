@@ -87,12 +87,12 @@ async def lifespan(app: FastAPI):
 
 
 async def _cleanup_tmp_files():
-    """定期清理 data/tmp 下超过 1 小时的缓存图片/视频，防止 Zeabur 等容器磁盘积累"""
+    """定期清理 data/tmp 下超过 30 分钟的缓存图片/视频，防止 Zeabur 等容器磁盘积累"""
     from app.core.storage import DATA_DIR
 
     dirs = [DATA_DIR / "tmp" / "image", DATA_DIR / "tmp" / "video"]
-    interval = 3600  # 每小时运行一次
-    ttl = 3600  # 超过 1 小时的文件删除
+    interval = 900  # 每 15 分钟运行一次
+    ttl = 1800  # 超过 30 分钟的文件删除
 
     while True:
         await asyncio.sleep(interval)

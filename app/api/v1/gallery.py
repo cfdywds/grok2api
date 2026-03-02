@@ -2,14 +2,13 @@
 图片管理 API 路由
 """
 
-import io
 import json
 import zipfile
 import random
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.core.logger import logger
 from app.services.gallery import (
@@ -48,16 +47,6 @@ class ImportImageRequest(BaseModel):
     """导入图片请求"""
     source_path: str
     tags: Optional[List[str]] = None
-
-
-class AnalyzeQualityRequest(BaseModel):
-    """分析图片质量请求"""
-    image_ids: Optional[List[str]] = None
-    update_metadata: bool = True
-    batch_size: int = 50
-    skip_analyzed: bool = False
-    max_workers: int = Field(default=8, ge=1, le=16)
-    fast_mode: bool = Field(default=True, description="快速模式（仅检测模糊）")
 
 
 @router.post("/scan")
@@ -469,88 +458,62 @@ async def get_stats():
 @router.post("/images/export")
 async def export_images(request: ExportImagesRequest):
     """
-    批量导出图片（ZIP）
+    批量导出图片（ZIP） — 使用临时文件避免内存尖峰
     """
+    import tempfile
+    import os
+
+    tmp_path = None
     try:
         service = get_image_metadata_service()
 
-        # 创建内存中的 ZIP 文件
-        zip_buffer = io.BytesIO()
+        # 写入临时文件而非内存
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+        os.close(tmp_fd)
 
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for image_id in request.image_ids:
-                # 获取图片元数据
                 image = await service.get_image(image_id)
                 if not image:
                     continue
 
-                # 读取图片文件
                 file_path = service.image_dir / image.filename
                 if not file_path.exists():
                     continue
 
-                # 添加到 ZIP
                 zip_file.write(file_path, arcname=image.filename)
 
-        # 重置缓冲区位置
-        zip_buffer.seek(0)
+        zip_size = os.path.getsize(tmp_path)
 
-        # 返回 ZIP 文件
+        async def _stream_and_cleanup():
+            try:
+                with open(tmp_path, "rb") as f:
+                    while chunk := f.read(65536):
+                        yield chunk
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
         return StreamingResponse(
-            zip_buffer,
+            _stream_and_cleanup(),
             media_type="application/zip",
             headers={
-                "Content-Disposition": f"attachment; filename=images_export.zip"
+                "Content-Disposition": "attachment; filename=images_export.zip",
+                "Content-Length": str(zip_size),
             },
         )
 
     except Exception as e:
+        # 异常时也清理临时文件
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
         logger.error(f"批量导出图片失败: {e}")
         raise HTTPException(status_code=500, detail=f"批量导出图片失败: {str(e)}")
-
-
-@router.post("/analyze-quality")
-async def analyze_quality(request: AnalyzeQualityRequest):
-    """
-    批量分析图片质量
-    """
-    try:
-        service = get_image_metadata_service()
-        result = await service.batch_analyze_quality(
-            image_ids=request.image_ids,
-            update_metadata=request.update_metadata,
-            batch_size=request.batch_size,
-            skip_analyzed=request.skip_analyzed,
-            max_workers=request.max_workers,
-            fast_mode=request.fast_mode,
-        )
-
-        return {
-            "success": True,
-            "message": f"分析完成: 成功 {result['analyzed']}, 失败 {result['failed']}, 低质量 {result['low_quality_count']}",
-            "data": result,
-        }
-
-    except Exception as e:
-        logger.error(f"批量分析图片质量失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量分析图片质量失败: {str(e)}")
-
-
-@router.post("/stop-analysis")
-async def stop_analysis():
-    """
-    停止正在进行的图片质量分析
-    """
-    try:
-        service = get_image_metadata_service()
-        service.stop_analysis()
-        return {
-            "success": True,
-            "message": "已发送停止信号",
-        }
-    except Exception as e:
-        logger.error(f"停止分析失败: {e}")
-        raise HTTPException(status_code=500, detail=f"停止分析失败: {str(e)}")
 
 
 @router.get("/check-missing")
@@ -570,30 +533,6 @@ async def check_missing_files():
     except Exception as e:
         logger.error(f"检查失效图片失败: {e}")
         raise HTTPException(status_code=500, detail=f"检查失效图片失败: {str(e)}")
-
-
-@router.get("/images/{image_id}/quality")
-async def get_image_quality(image_id: str):
-    """
-    获取单张图片的质量分析
-    """
-    try:
-        service = get_image_metadata_service()
-        result = await service.analyze_image_quality(image_id)
-
-        if not result:
-            raise HTTPException(status_code=404, detail="图片不存在或分析失败")
-
-        return {
-            "success": True,
-            "data": result,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取图片质量失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取图片质量失败: {str(e)}")
 
 
 @router.post("/images/{image_id}/favorite")

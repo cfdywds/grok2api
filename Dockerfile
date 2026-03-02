@@ -16,6 +16,9 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONMALLOC=malloc \
+    MALLOC_TRIM_THRESHOLD_=65536 \
+    LOG_FILE_ENABLED=false \
     TZ=Asia/Shanghai
 
 ENV PATH="/opt/venv/bin:$PATH"

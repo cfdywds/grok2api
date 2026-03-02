@@ -195,7 +195,6 @@ async function startMigration() {
                         height: img.height,
                         tags: img.tags || [],
                         favorite: img.favorite || false,
-                        quality_score: img.quality_score ?? null,
                     });
                     existingIds.add(img.id);
 

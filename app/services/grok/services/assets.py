@@ -169,6 +169,8 @@ class BaseService:
             # 使用完整浏览器指纹头（与 chat 请求保持一致，防止 WAF 拦截）
             headers = build_grok_headers(token)
             headers["Referer"] = referer
+            # 上传/删除/列表是写操作，需要 sso-rw cookie 授权
+            headers["Cookie"] = build_sso_cookie(token, include_rw=True)
 
         return headers
 

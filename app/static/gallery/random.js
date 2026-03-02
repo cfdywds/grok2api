@@ -5,7 +5,6 @@ const state = {
   currentImage: null,
   currentObjectURL: null,
   viewedIds: [],
-  minQualityScore: 40,
   allImages: [],
 };
 
@@ -199,9 +198,7 @@ function handleKeyDown(e) {
 async function loadImagePool() {
   try {
     const data = await Workspace.readMetadata();
-    state.allImages = (data.images || []).filter(
-      img => img.filename && (img.quality_score == null || img.quality_score >= state.minQualityScore)
-    );
+    state.allImages = (data.images || []).filter(img => img.filename);
   } catch (e) {
     state.allImages = [];
   }
@@ -315,14 +312,6 @@ function updateInfoPanel(img) {
   // 提示词
   document.getElementById('info-prompt').textContent = img.prompt || '-';
 
-  // 质量评分
-  const qualityScore = img.quality_score || 0;
-  const qualityFill = document.getElementById('quality-fill');
-  const qualityText = document.getElementById('quality-text');
-
-  qualityFill.style.width = `${qualityScore}%`;
-  qualityText.textContent = qualityScore.toFixed(1);
-
   // 尺寸
   const sizeText = img.width && img.height
     ? `${img.width} × ${img.height} (${img.aspect_ratio || '-'})`
@@ -343,12 +332,11 @@ function toggleInfoPanel() {
     if (!state.currentImage) return;
 
     const img = state.currentImage;
-    const qualityScore = img.quality_score || 0;
     const sizeText = img.width && img.height
       ? `${img.width} × ${img.height}`
       : '-';
 
-    const message = `质量: ${qualityScore.toFixed(1)} | 尺寸: ${sizeText}`;
+    const message = `尺寸: ${sizeText}`;
     showToast(message, 'info');
   } else {
     elements.infoPanel.classList.toggle('collapsed');

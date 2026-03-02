@@ -50,18 +50,10 @@ const state = {
         aspectRatio: '',
         sortBy: 'created_at',
         sortOrder: 'desc',
-        minQualityScore: null,
-        maxQualityScore: null,
-        hasQualityIssues: null,
         favorite: null,
     },
     currentImageId: null,
     currentImageIndex: -1,
-    analysisState: {
-        mode: 'all',
-        maxWorkers: 8,
-        stopped: false,
-    },
 };
 
 // Toast 通知系统
@@ -254,16 +246,13 @@ async function fetchImages() {
         let images = meta.images || [];
 
         // 本地筛选
-        const { search, model, aspectRatio, sortBy, sortOrder, minQualityScore, maxQualityScore, hasQualityIssues, favorite } = state.filters;
+        const { search, model, aspectRatio, sortBy, sortOrder, favorite } = state.filters;
         if (search) {
             const kw = search.toLowerCase();
             images = images.filter(img => (img.prompt || '').toLowerCase().includes(kw));
         }
         if (model) images = images.filter(img => img.model === model);
         if (aspectRatio) images = images.filter(img => img.aspect_ratio === aspectRatio);
-        if (minQualityScore !== null) images = images.filter(img => img.quality_score !== null && img.quality_score >= minQualityScore);
-        if (maxQualityScore !== null) images = images.filter(img => img.quality_score !== null && img.quality_score <= maxQualityScore);
-        if (hasQualityIssues !== null) images = images.filter(img => hasQualityIssues ? (img.quality_issues && img.quality_issues.length > 0) : (!img.quality_issues || img.quality_issues.length === 0));
         if (favorite !== null) images = images.filter(img => img.favorite === favorite);
 
         // 本地排序
@@ -491,7 +480,6 @@ async function checkMissingFiles() {
                 row.innerHTML = `
                     <td style="padding: 8px; font-family: monospace; font-size: 12px;">${escapeHtml(img.filename)}</td>
                     <td style="padding: 8px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(img.prompt || '-')}</td>
-                    <td style="padding: 8px; text-align: center;">${img.quality_score != null ? Number(img.quality_score).toFixed(0) : '-'}</td>
                 `;
                 list.appendChild(row);
             });
@@ -503,126 +491,6 @@ async function checkMissingFiles() {
         console.error('检查失效图片失败:', error);
         Toast.error('检查失败，请重试');
     }
-}
-
-async function analyzeQuality(imageIds = null) {
-    state.analysisState.stopped = false;
-    try {
-        document.getElementById('analyze-btn').style.display = 'none';
-        document.getElementById('stop-analysis-btn').style.display = 'inline-block';
-
-        showLoading();
-
-        const data = await Workspace.readMetadata();
-        const allImages = data.images || [];
-        const mode = state.analysisState.mode === 'skip' ? '增量' : '全量';
-
-        let toAnalyze = imageIds
-            ? allImages.filter(img => imageIds.includes(img.id))
-            : (state.analysisState.mode === 'skip'
-                ? allImages.filter(img => img.quality_score == null)
-                : allImages);
-
-        let analyzed = 0;
-        let failed = 0;
-
-        for (const img of toAnalyze) {
-            if (state.analysisState.stopped) break;
-
-            const objectURL = await Workspace.getImageURL(img.filename);
-            if (!objectURL) {
-                failed++;
-                continue;
-            }
-
-            try {
-                const score = await _analyzeImageCanvas(objectURL);
-                await Workspace.updateImageMetadata(img.id, { quality_score: score });
-                analyzed++;
-            } catch (e) {
-                failed++;
-            } finally {
-                URL.revokeObjectURL(objectURL);
-            }
-        }
-
-        const stopped = state.analysisState.stopped;
-        if (stopped) {
-            Toast.warning(`${mode}分析已停止：已完成 ${analyzed}/${toAnalyze.length} 张`);
-        } else {
-            Toast.success(`${mode}分析完成：成功 ${analyzed}，失败 ${failed}`);
-        }
-
-        fetchImages();
-        fetchStats();
-    } catch (error) {
-        console.error('分析图片质量失败:', error);
-        Toast.error('分析失败，请重试');
-    } finally {
-        hideLoading();
-        document.getElementById('analyze-btn').style.display = 'inline-block';
-        document.getElementById('stop-analysis-btn').style.display = 'none';
-        state.analysisState.stopped = false;
-    }
-}
-
-function _analyzeImageCanvas(objectURL) {
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-            try {
-                const canvas = document.createElement('canvas');
-                const maxDim = 256;
-                const ratio = img.naturalWidth / img.naturalHeight;
-                const w = ratio >= 1 ? maxDim : Math.round(maxDim * ratio);
-                const h = ratio >= 1 ? Math.round(maxDim / ratio) : maxDim;
-                canvas.width = w;
-                canvas.height = h;
-
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, w, h);
-                const pixels = ctx.getImageData(0, 0, w, h).data;
-
-                // 亮度评分
-                let totalBrightness = 0;
-                const pixelCount = pixels.length / 4;
-                const gray = new Float32Array(pixelCount);
-                for (let i = 0; i < pixels.length; i += 4) {
-                    const g = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
-                    gray[i / 4] = g;
-                    totalBrightness += g;
-                }
-                const avgBrightness = totalBrightness / pixelCount;
-                const brightnessScore = avgBrightness < 20 ? avgBrightness * 2
-                    : avgBrightness > 230 ? (255 - avgBrightness) * 2
-                    : 100 - Math.abs(avgBrightness - 128) * 0.39;
-
-                // 模糊评分（Laplacian variance）
-                let lapSum = 0;
-                for (let y = 1; y < h - 1; y++) {
-                    for (let x = 1; x < w - 1; x++) {
-                        const i = y * w + x;
-                        const lap = gray[i - w] + gray[i + w] + gray[i - 1] + gray[i + 1] - 4 * gray[i];
-                        lapSum += lap * lap;
-                    }
-                }
-                const lapVar = lapSum / ((w - 2) * (h - 2));
-                const blurScore = Math.min(100, Math.sqrt(lapVar) * 2);
-
-                const score = Math.round(Math.max(0, Math.min(100, brightnessScore * 0.3 + blurScore * 0.7)));
-                resolve(score);
-            } catch (e) {
-                reject(e);
-            }
-        };
-        img.onerror = () => reject(new Error('Image load failed'));
-        img.src = objectURL;
-    });
-}
-
-function stopAnalysis() {
-    state.analysisState.stopped = true;
-    Toast.info('正在停止分析...');
 }
 
 async function uploadImages(files) {
@@ -742,24 +610,12 @@ function createImageCard(image) {
 
     const isSelected = state.selectedIds.has(image.id);
 
-    // 质量评分显示
-    let qualityBadge = '';
-    if (image.quality_score !== null && image.quality_score !== undefined) {
-        const score = image.quality_score;
-        let qualityClass = 'quality-low';
-        if (score >= 80) qualityClass = 'quality-high';
-        else if (score >= 60) qualityClass = 'quality-medium';
-
-        qualityBadge = `<div class="quality-badge ${qualityClass}">${score.toFixed(0)}</div>`;
-    }
-
     // 收藏按钮
     const favoriteClass = image.favorite ? 'favorited' : '';
     const favoriteIcon = image.favorite ? '❤️' : '🤍';
 
     card.innerHTML = `
         <input type="checkbox" class="image-card-checkbox" ${isSelected ? 'checked' : ''}>
-        ${qualityBadge}
         <button class="favorite-btn ${favoriteClass}" data-id="${image.id}" title="${image.favorite ? '取消收藏' : '收藏'}">${favoriteIcon}</button>
         <img src="" data-filename="${image.filename}" alt="${image.prompt}" class="image-card-img">
         <div class="image-card-info">
@@ -949,40 +805,6 @@ async function showImageDetail(imageId) {
         favoriteBtn.classList.remove('btn-danger');
     }
 
-    // 显示质量信息
-    const qualityInfo = document.getElementById('quality-info');
-    if (image.quality_score !== null && image.quality_score !== undefined) {
-        qualityInfo.style.display = 'block';
-
-        const score = image.quality_score;
-        const fill = document.getElementById('detail-quality-fill');
-        const scoreText = document.getElementById('detail-quality-score');
-
-        // 设置进度条
-        fill.style.width = `${score}%`;
-        if (score >= 80) fill.style.backgroundColor = '#4caf50';
-        else if (score >= 60) fill.style.backgroundColor = '#ff9800';
-        else fill.style.backgroundColor = '#f44336';
-
-        scoreText.textContent = `${score.toFixed(0)}分`;
-
-        // 显示详细分数
-        document.getElementById('detail-blur').textContent = `模糊度: ${(image.blur_score || 0).toFixed(1)}`;
-        document.getElementById('detail-brightness').textContent = `亮度: ${(image.brightness_score || 0).toFixed(1)}`;
-
-        // 显示质量问题
-        const issuesContainer = document.getElementById('detail-quality-issues');
-        if (image.quality_issues && image.quality_issues.length > 0) {
-            issuesContainer.innerHTML = image.quality_issues.map(issue =>
-                `<span class="quality-issue-tag">${escapeHtml(issue)}</span>`
-            ).join('');
-        } else {
-            issuesContainer.innerHTML = '<span class="quality-ok">✓ 无质量问题</span>';
-        }
-    } else {
-        qualityInfo.style.display = 'none';
-    }
-
     // 渲染标签
     const tagsContainer = document.getElementById('detail-tags');
     tagsContainer.innerHTML = '';
@@ -1065,33 +887,6 @@ function initEventListeners() {
         state.filters.sortBy = sortBy;
         state.filters.sortOrder = sortOrder;
 
-        // 质量筛选
-        const qualityValue = document.getElementById('quality-filter').value;
-        if (qualityValue === 'low40') {
-            // 低于40分
-            state.filters.minQualityScore = null;
-            state.filters.maxQualityScore = 40;
-            state.filters.hasQualityIssues = null;
-        } else if (qualityValue === 'low') {
-            // 低于60分
-            state.filters.minQualityScore = null;
-            state.filters.maxQualityScore = 60;
-            state.filters.hasQualityIssues = null;
-        } else if (qualityValue === 'issues') {
-            state.filters.minQualityScore = null;
-            state.filters.maxQualityScore = null;
-            state.filters.hasQualityIssues = true;
-        } else if (qualityValue) {
-            // 大于等于指定分数
-            state.filters.minQualityScore = parseFloat(qualityValue);
-            state.filters.maxQualityScore = null;
-            state.filters.hasQualityIssues = null;
-        } else {
-            state.filters.minQualityScore = null;
-            state.filters.maxQualityScore = null;
-            state.filters.hasQualityIssues = null;
-        }
-
         // 收藏筛选
         const favoriteValue = document.getElementById('favorite-filter').value;
         if (favoriteValue === 'true') {
@@ -1134,7 +929,6 @@ function initEventListeners() {
         document.getElementById('model-filter').value = '';
         document.getElementById('ratio-filter').value = '';
         document.getElementById('sort-filter').value = 'created_at:desc';
-        document.getElementById('quality-filter').value = '';
         document.getElementById('favorite-filter').value = '';
         document.getElementById('page-size-filter').value = '100';
 
@@ -1144,9 +938,6 @@ function initEventListeners() {
             aspectRatio: '',
             sortBy: 'created_at',
             sortOrder: 'desc',
-            minQualityScore: null,
-            maxQualityScore: null,
-            hasQualityIssues: null,
             favorite: null,
         };
 
@@ -1366,47 +1157,6 @@ function initEventListeners() {
         }
     });
 
-    // 重新分析单张图片
-    document.getElementById('reanalyze-btn').addEventListener('click', async () => {
-        if (!state.currentImageId) return;
-
-        const btn = document.getElementById('reanalyze-btn');
-        const originalText = btn.innerHTML;
-
-        try {
-            btn.disabled = true;
-            btn.innerHTML = '⏳ 分析中...';
-            btn.style.opacity = '0.6';
-
-            Toast.info('开始分析图片质量...', '', 2000);
-
-            // 从本地 metadata 找到图片
-            const data = await Workspace.readMetadata();
-            const img = (data.images || []).find(i => i.id === state.currentImageId);
-            if (!img) throw new Error('图片元数据不存在');
-
-            const objectURL = await Workspace.getImageURL(img.filename);
-            if (!objectURL) throw new Error('图片文件不存在于工作目录');
-
-            try {
-                const score = await _analyzeImageCanvas(objectURL);
-                await Workspace.updateImageMetadata(img.id, { quality_score: score });
-                Toast.success(`分析完成！质量分数已更新`, '', 3000);
-                await showImageDetail(state.currentImageId);
-                fetchImages();
-            } finally {
-                URL.revokeObjectURL(objectURL);
-            }
-        } catch (error) {
-            console.error('重新分析图片失败:', error);
-            Toast.error(`分析失败: ${error.message}`);
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            btn.style.opacity = '1';
-        }
-    });
-
     // 添加标签
     document.getElementById('add-tag-btn').addEventListener('click', async () => {
         await addTag();
@@ -1452,60 +1202,6 @@ function initEventListeners() {
     // 检查失效图片按钮
     document.getElementById('check-missing-btn').addEventListener('click', async () => {
         await checkMissingFiles();
-    });
-
-    // 质量分析按钮
-    document.getElementById('analyze-btn').addEventListener('click', async () => {
-        const selectedCount = state.selectedIds.size;
-        const imageIds = selectedCount > 0 ? Array.from(state.selectedIds) : null;
-        await analyzeQuality(imageIds);
-    });
-
-    // 停止分析按钮
-    document.getElementById('stop-analysis-btn').addEventListener('click', () => {
-        stopAnalysis();
-    });
-
-    // 分析选项按钮
-    document.getElementById('analyze-options-btn').addEventListener('click', () => {
-        document.getElementById('analysis-options-modal').style.display = 'flex';
-        updateEstimatedTime();
-    });
-
-    // 关闭选项弹窗
-    document.getElementById('close-analysis-options').addEventListener('click', () => {
-        document.getElementById('analysis-options-modal').style.display = 'none';
-    });
-
-    document.getElementById('cancel-analysis-options-btn').addEventListener('click', () => {
-        document.getElementById('analysis-options-modal').style.display = 'none';
-    });
-
-    // 并发数滑块
-    document.getElementById('worker-count-slider').addEventListener('input', (e) => {
-        const value = e.target.value;
-        document.getElementById('worker-count-display').textContent = value;
-        updateEstimatedTime();
-    });
-
-    // 分析模式切换
-    document.querySelectorAll('input[name="analysis-mode"]').forEach(radio => {
-        radio.addEventListener('change', updateEstimatedTime);
-    });
-
-    // 开始分析
-    document.getElementById('start-analysis-btn').addEventListener('click', async () => {
-        // 保存选项
-        state.analysisState.mode = document.querySelector('input[name="analysis-mode"]:checked').value;
-        state.analysisState.maxWorkers = parseInt(document.getElementById('worker-count-slider').value);
-
-        // 关闭弹窗
-        document.getElementById('analysis-options-modal').style.display = 'none';
-
-        // 执行分析
-        const selectedCount = state.selectedIds.size;
-        const imageIds = selectedCount > 0 ? Array.from(state.selectedIds) : null;
-        await analyzeQuality(imageIds);
     });
 
     // 上传按钮
@@ -1772,43 +1468,6 @@ async function removeTag(tag) {
     } else {
         Toast.error('标签删除失败');
     }
-}
-
-// 预估时间计算
-function updateEstimatedTime() {
-    const mode = document.querySelector('input[name="analysis-mode"]:checked').value;
-    const workers = parseInt(document.getElementById('worker-count-slider').value);
-
-    // 基准速度：0.24 秒/张
-    const baseTime = 0.24;
-
-    // 加速比（基于实测数据）
-    const speedupFactors = {
-        4: 1.17,
-        8: 1.62,
-        12: 1.68,
-        16: 1.70
-    };
-    const speedup = speedupFactors[workers] || 1.62;
-    const timePerImage = baseTime / speedup;
-
-    // 计算图片数量
-    let imageCount;
-    if (mode === 'skip') {
-        // 假设 10% 的图片未分析（可以从 API 获取精确值）
-        imageCount = Math.ceil(state.total * 0.1);
-    } else {
-        imageCount = state.total;
-    }
-
-    // 计算总时间
-    const totalSeconds = imageCount * timePerImage;
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = Math.floor(totalSeconds % 60);
-
-    // 显示结果
-    const display = document.getElementById('estimated-time');
-    display.textContent = `约 ${minutes} 分 ${seconds} 秒（${imageCount} 张图片）`;
 }
 
 // 初始化

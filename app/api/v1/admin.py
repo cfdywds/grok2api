@@ -47,63 +47,6 @@ TEMPLATE_DIR = Path(__file__).parent.parent.parent / "static"
 
 # ── 内存图片质量分析（不依赖文件 I/O）────────────────────────────────────────
 
-_QUALITY_FILTER_THRESHOLD = 40
-
-
-def _analyze_quality_from_base64(b64_data: str) -> dict:
-    """
-    从 base64 数据在内存中分析图片质量。
-    使用 OpenCV 基础分析：模糊度、亮度、对比度。
-    返回 {"quality_score": float, ...}
-    """
-    try:
-        import cv2
-        import numpy as np
-
-        raw = base64.b64decode(b64_data)
-        nparr = np.frombuffer(raw, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if img is None:
-            return {"quality_score": 0}
-
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        # 模糊度
-        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        if laplacian_var < 50:
-            blur_score = laplacian_var / 50 * 40
-        elif laplacian_var < 200:
-            blur_score = 40 + (laplacian_var - 50) / 150 * 40
-        else:
-            blur_score = 80 + min(20, (laplacian_var - 200) / 100 * 20)
-        blur_score = max(0, min(100, blur_score))
-
-        # 亮度
-        brightness = float(np.mean(gray))
-        brightness_score = brightness / 255 * 100
-
-        # 对比度
-        contrast = float(gray.std())
-        if contrast < 20:
-            contrast_score = contrast / 20 * 50
-        elif contrast < 50:
-            contrast_score = 50 + (contrast - 20) / 30 * 30
-        else:
-            contrast_score = 80 + min(20, (contrast - 50) / 30 * 20)
-        contrast_score = max(0, min(100, contrast_score))
-
-        quality_score = (
-            blur_score * 0.5
-            + contrast_score * 0.3
-            + (100 - abs(brightness_score - 50) * 1.5) * 0.2
-        )
-        quality_score = max(0, min(100, quality_score))
-
-        return {"quality_score": round(quality_score, 1)}
-    except Exception as e:
-        logger.warning(f"内存图片质量分析失败: {e}")
-        return {"quality_score": -1}
-
 
 router = APIRouter()
 
@@ -525,19 +468,6 @@ async def admin_imagine_ws(websocket: WebSocket):
                 if images and all(img and img != "error" for img in images):
                     # 一次发送所有 6 张图片
                     for img_b64 in images:
-                        # 质量过滤
-                        score = None
-                        if auto_filter:
-                            result = await asyncio.to_thread(
-                                _analyze_quality_from_base64, img_b64
-                            )
-                            score = result.get("quality_score", -1)
-                            if 0 <= score < _QUALITY_FILTER_THRESHOLD:
-                                logger.info(
-                                    f"Image filtered: score={score} < {_QUALITY_FILTER_THRESHOLD}"
-                                )
-                                continue
-
                         sequence += 1
                         msg = {
                             "type": "image",
@@ -548,8 +478,6 @@ async def admin_imagine_ws(websocket: WebSocket):
                             "aspect_ratio": aspect_ratio,
                             "run_id": run_id,
                         }
-                        if score is not None:
-                            msg["quality_score"] = score
                         await _send(msg)
 
                     # 图片已由客户端本地存储，服务端不再保存
@@ -790,19 +718,6 @@ async def admin_imagine_sse(
 
                     if images and all(img and img != "error" for img in images):
                         for img_b64 in images:
-                            # 质量过滤
-                            score = None
-                            if sse_auto_filter:
-                                result = await asyncio.to_thread(
-                                    _analyze_quality_from_base64, img_b64
-                                )
-                                score = result.get("quality_score", -1)
-                                if 0 <= score < _QUALITY_FILTER_THRESHOLD:
-                                    logger.info(
-                                        f"SSE image filtered: score={score} < {_QUALITY_FILTER_THRESHOLD}"
-                                    )
-                                    continue
-
                             sequence += 1
                             msg = {
                                 "type": "image",
@@ -813,8 +728,6 @@ async def admin_imagine_sse(
                                 "aspect_ratio": ratio,
                                 "run_id": run_id,
                             }
-                            if score is not None:
-                                msg["quality_score"] = score
                             yield _sse_event(msg)
 
                         try:

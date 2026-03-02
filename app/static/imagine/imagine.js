@@ -274,11 +274,7 @@
     left.textContent = meta && meta.sequence ? `#${meta.sequence}` : '#';
     const right = document.createElement('span');
     if (meta && meta.elapsed_ms) {
-      const parts = [`${meta.elapsed_ms}ms`];
-      if (meta.quality_score != null && meta.quality_score >= 0) {
-        parts.push(`Q:${meta.quality_score}`);
-      }
-      right.textContent = parts.join(' · ');
+      right.textContent = `${meta.elapsed_ms}ms`;
     } else {
       right.textContent = '';
     }
@@ -331,7 +327,6 @@
             height: null,
             tags: [],
             nsfw: false,
-            quality_score: null,
             favorite: false,
           };
           Workspace.addImageMetadata(entry).catch(() => {});
