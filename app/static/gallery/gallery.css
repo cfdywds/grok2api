@@ -85,21 +85,20 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-wrap: wrap;
     gap: 10px;
 }
 
 .toolbar-left,
 .toolbar-right {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
-    flex-wrap: wrap;
 }
 
 .toolbar-left {
     flex: 1;
-    min-width: 300px;
+    min-width: 0;
+    overflow-x: auto;
 }
 
 .toolbar-right {
@@ -111,16 +110,20 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     font-size: 0.875rem;
-    min-width: 200px;
+    width: 160px;
+    min-width: 120px;
+    flex-shrink: 1;
 }
 
 .filter-select {
-    padding: 8px 12px;
+    padding: 8px 8px;
     border: 1px solid var(--border-color);
     border-radius: 4px;
     font-size: 0.875rem;
     background: white;
     cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 /* 按钮 */
@@ -703,18 +706,6 @@ body {
     display: none;
 }
 
-@media (max-width: 768px) {
-    .filter-toggle-btn {
-        display: inline-flex;
-        width: 100%;
-    }
-
-    /* 桌面端筛选按钮在移动端隐藏（用折叠按钮替代） */
-    #filter-btn {
-        display: none;
-    }
-}
-
 /* 响应式设计 */
 @media (max-width: 768px) {
     .modal-body {
@@ -730,6 +721,7 @@ body {
     .toolbar-left {
         width: 100%;
         flex-wrap: wrap;
+        overflow-x: visible;
     }
 
     .toolbar-left .filter-select,
@@ -745,6 +737,16 @@ body {
 
     .toolbar-left.expanded .filter-select {
         display: block;
+    }
+
+    .filter-toggle-btn {
+        display: inline-flex;
+        width: 100%;
+    }
+
+    /* 桌面端筛选按钮在移动端隐藏（用折叠按钮替代） */
+    #filter-btn {
+        display: none;
     }
 
     .toolbar-right {
