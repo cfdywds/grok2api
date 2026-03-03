@@ -2,17 +2,14 @@
 图片管理 API 路由
 """
 
-import json
-import zipfile
 import random
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.core.logger import logger
 from app.services.gallery import (
-    ImageMetadataService,
     ImageFilter,
     ImageListResponse,
     ImageStats,
@@ -38,17 +35,6 @@ class ToggleFavoriteRequest(BaseModel):
     favorite: bool
 
 
-class ExportImagesRequest(BaseModel):
-    """批量导出图片请求"""
-    image_ids: List[str]
-
-
-class ImportImageRequest(BaseModel):
-    """导入图片请求"""
-    source_path: str
-    tags: Optional[List[str]] = None
-
-
 @router.post("/scan")
 async def scan_local_images():
     """
@@ -69,75 +55,6 @@ async def scan_local_images():
         raise HTTPException(status_code=500, detail=f"扫描本地图片失败: {str(e)}")
 
 
-@router.post("/import")
-async def import_image(request: ImportImageRequest):
-    """
-    从指定路径导入图片
-    """
-    try:
-        service = get_image_metadata_service()
-        image_id = await service.import_image(request.source_path, request.tags)
-
-        if not image_id:
-            raise HTTPException(status_code=400, detail="导入图片失败")
-
-        return {
-            "success": True,
-            "message": "导入图片成功",
-            "data": {"image_id": image_id},
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"导入图片失败: {e}")
-        raise HTTPException(status_code=500, detail=f"导入图片失败: {str(e)}")
-
-
-@router.post("/upload")
-async def upload_image(
-    file: bytes = None,
-    filename: str = None,
-    tags: Optional[str] = None,
-):
-    """
-    上传图片文件
-    """
-    try:
-        from fastapi import File, UploadFile, Form
-        import tempfile
-
-        service = get_image_metadata_service()
-
-        # 创建临时文件
-        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as tmp_file:
-            tmp_file.write(file)
-            tmp_path = tmp_file.name
-
-        try:
-            # 导入图片
-            tag_list = tags.split(",") if tags else ["上传"]
-            image_id = await service.import_image(tmp_path, tag_list)
-
-            if not image_id:
-                raise HTTPException(status_code=400, detail="上传图片失败")
-
-            return {
-                "success": True,
-                "message": "上传图片成功",
-                "data": {"image_id": image_id},
-            }
-        finally:
-            # 清理临时文件
-            Path(tmp_path).unlink(missing_ok=True)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"上传图片失败: {e}")
-        raise HTTPException(status_code=500, detail=f"上传图片失败: {str(e)}")
-
-
 @router.get("/images", response_model=ImageListResponse)
 async def list_images(
     page: int = Query(1, ge=1, description="页码"),
@@ -149,33 +66,7 @@ async def list_images(
     start_date: Optional[int] = Query(None, description="开始日期（时间戳）"),
     end_date: Optional[int] = Query(None, description="结束日期（时间戳）"),
     nsfw: Optional[bool] = Query(None, description="是否筛选敏感内容"),
-
-    # 质量分数筛选
-    min_quality_score: Optional[float] = Query(None, description="最低质量分数筛选"),
-    max_quality_score: Optional[float] = Query(None, description="最高质量分数筛选"),
-    quality_level: Optional[str] = Query(None, description="质量等级: excellent, good, fair, poor, very_poor, low_quality"),
-
-    # 快捷筛选预设
-    low_quality: Optional[bool] = Query(None, description="快捷筛选：质量分数<40的低质量图片"),
-
-    # 模糊度筛选
-    min_blur_score: Optional[float] = Query(None, description="最低模糊度分数筛选"),
-    max_blur_score: Optional[float] = Query(None, description="最高模糊度分数筛选"),
-
-    # 亮度筛选
-    min_brightness_score: Optional[float] = Query(None, description="最低亮度分数筛选"),
-    max_brightness_score: Optional[float] = Query(None, description="最高亮度分数筛选"),
-
-    # 质量问题筛选
-    has_quality_issues: Optional[bool] = Query(None, description="是否筛选有质量问题的图片"),
-
-    # 快捷筛选
-    only_analyzed: Optional[bool] = Query(None, description="仅显示已分析的图片"),
-    only_unanalyzed: Optional[bool] = Query(None, description="仅显示未分析的图片"),
-
-    # 收藏筛选
     favorite: Optional[bool] = Query(None, description="是否筛选收藏的图片"),
-
     sort_by: str = Query("created_at", description="排序字段"),
     sort_order: str = Query("desc", description="排序顺序（asc/desc）"),
 ):
@@ -184,9 +75,6 @@ async def list_images(
     """
     try:
         service = get_image_metadata_service()
-
-        # 调试日志
-        logger.info(f"API 接收参数: min_quality_score={min_quality_score}, max_quality_score={max_quality_score}, favorite={favorite}")
 
         # 构建筛选条件
         filters = ImageFilter(
@@ -197,22 +85,8 @@ async def list_images(
             start_date=start_date,
             end_date=end_date,
             nsfw=nsfw,
-            min_quality_score=min_quality_score,
-            max_quality_score=max_quality_score,
-            quality_level=quality_level,
-            low_quality=low_quality,
-            min_blur_score=min_blur_score,
-            max_blur_score=max_blur_score,
-            min_brightness_score=min_brightness_score,
-            max_brightness_score=max_brightness_score,
-            has_quality_issues=has_quality_issues,
-            only_analyzed=only_analyzed,
-            only_unanalyzed=only_unanalyzed,
             favorite=favorite,
         )
-
-        # 调试日志
-        logger.info(f"构建的筛选条件: {filters}")
 
         # 获取图片列表
         result = await service.list_images(
@@ -222,9 +96,6 @@ async def list_images(
             sort_by=sort_by,
             sort_order=sort_order,
         )
-
-        # 调试日志
-        logger.info(f"返回结果: total={result.total}, images_count={len(result.images)}")
 
         return result
 
@@ -453,67 +324,6 @@ async def get_stats():
     except Exception as e:
         logger.error(f"获取统计信息失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
-
-
-@router.post("/images/export")
-async def export_images(request: ExportImagesRequest):
-    """
-    批量导出图片（ZIP） — 使用临时文件避免内存尖峰
-    """
-    import tempfile
-    import os
-
-    tmp_path = None
-    try:
-        service = get_image_metadata_service()
-
-        # 写入临时文件而非内存
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-        os.close(tmp_fd)
-
-        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for image_id in request.image_ids:
-                image = await service.get_image(image_id)
-                if not image:
-                    continue
-
-                file_path = service.image_dir / image.filename
-                if not file_path.exists():
-                    continue
-
-                zip_file.write(file_path, arcname=image.filename)
-
-        zip_size = os.path.getsize(tmp_path)
-
-        async def _stream_and_cleanup():
-            try:
-                with open(tmp_path, "rb") as f:
-                    while chunk := f.read(65536):
-                        yield chunk
-            finally:
-                try:
-                    os.unlink(tmp_path)
-                except Exception:
-                    pass
-
-        return StreamingResponse(
-            _stream_and_cleanup(),
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": "attachment; filename=images_export.zip",
-                "Content-Length": str(zip_size),
-            },
-        )
-
-    except Exception as e:
-        # 异常时也清理临时文件
-        if tmp_path:
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
-        logger.error(f"批量导出图片失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量导出图片失败: {str(e)}")
 
 
 @router.get("/check-missing")

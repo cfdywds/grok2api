@@ -3,10 +3,9 @@
 """
 
 import os
-import asyncio
 from typing import List, Optional, Dict, Any
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from app.core.storage import get_storage
 from app.core.logger import logger
@@ -246,125 +245,12 @@ class ImageMetadataService:
                 if img.get("nsfw", False) == filters.nsfw
             ]
 
-        # 快捷筛选：低质量图片（分数<40）
-        if filters.low_quality:
-            before_count = len(filtered)
-            filtered = [
-                img for img in filtered
-                if img.get("quality_score") is not None and img.get("quality_score") < 40
-            ]
-            logger.info(f"low_quality=True 筛选: {before_count} -> {len(filtered)}")
-
-        # 质量等级快捷筛选
-        if filters.quality_level:
-            quality_ranges = {
-                "excellent": (90, 100),
-                "good": (70, 89),
-                "fair": (40, 69),
-                "poor": (20, 39),
-                "very_poor": (0, 19),
-                "low_quality": (0, 39)  # 新增：低质量（<40）
-            }
-            if filters.quality_level in quality_ranges:
-                min_score, max_score = quality_ranges[filters.quality_level]
-                before_count = len(filtered)
-                filtered = [
-                    img for img in filtered
-                    if img.get("quality_score") is not None and min_score <= img.get("quality_score") <= max_score
-                ]
-                logger.info(f"quality_level={filters.quality_level} 筛选: {before_count} -> {len(filtered)}")
-
-        # 质量分数筛选
-        if filters.min_quality_score is not None:
-            before_count = len(filtered)
-            filtered = [
-                img for img in filtered
-                if img.get("quality_score") is not None and img.get("quality_score") >= filters.min_quality_score
-            ]
-            logger.info(f"min_quality_score={filters.min_quality_score} 筛选: {before_count} -> {len(filtered)}")
-
-        if filters.max_quality_score is not None:
-            before_count = len(filtered)
-            filtered = [
-                img for img in filtered
-                if img.get("quality_score") is not None and img.get("quality_score") < filters.max_quality_score
-            ]
-            logger.info(f"max_quality_score={filters.max_quality_score} 筛选: {before_count} -> {len(filtered)}")
-
-        # 模糊度筛选
-        if filters.min_blur_score is not None:
-            before_count = len(filtered)
-            filtered = [
-                img for img in filtered
-                if img.get("blur_score") is not None and img.get("blur_score") >= filters.min_blur_score
-            ]
-            logger.info(f"min_blur_score={filters.min_blur_score} 筛选: {before_count} -> {len(filtered)}")
-
-        if filters.max_blur_score is not None:
-            before_count = len(filtered)
-            filtered = [
-                img for img in filtered
-                if img.get("blur_score") is not None and img.get("blur_score") <= filters.max_blur_score
-            ]
-            logger.info(f"max_blur_score={filters.max_blur_score} 筛选: {before_count} -> {len(filtered)}")
-
-        # 亮度筛选
-        if filters.min_brightness_score is not None:
-            before_count = len(filtered)
-            filtered = [
-                img for img in filtered
-                if img.get("brightness_score") is not None and img.get("brightness_score") >= filters.min_brightness_score
-            ]
-            logger.info(f"min_brightness_score={filters.min_brightness_score} 筛选: {before_count} -> {len(filtered)}")
-
-        if filters.max_brightness_score is not None:
-            before_count = len(filtered)
-            filtered = [
-                img for img in filtered
-                if img.get("brightness_score") is not None and img.get("brightness_score") <= filters.max_brightness_score
-            ]
-            logger.info(f"max_brightness_score={filters.max_brightness_score} 筛选: {before_count} -> {len(filtered)}")
-
-        # 质量问题筛选
-        if filters.has_quality_issues is not None:
-            if filters.has_quality_issues:
-                # 只显示有质量问题的图片
-                filtered = [
-                    img for img in filtered
-                    if img.get("quality_issues") and len(img.get("quality_issues", [])) > 0
-                ]
-            else:
-                # 只显示没有质量问题的图片
-                filtered = [
-                    img for img in filtered
-                    if not img.get("quality_issues") or len(img.get("quality_issues", [])) == 0
-                ]
-
-        # 快捷筛选
-        if filters.only_analyzed:
-            before_count = len(filtered)
-            filtered = [
-                img for img in filtered
-                if img.get("quality_score") is not None
-            ]
-            logger.info(f"only_analyzed=True 筛选: {before_count} -> {len(filtered)}")
-
-        if filters.only_unanalyzed:
-            before_count = len(filtered)
-            filtered = [
-                img for img in filtered
-                if img.get("quality_score") is None
-            ]
-            logger.info(f"only_unanalyzed=True 筛选: {before_count} -> {len(filtered)}")
-
         # 收藏筛选
         if filters.favorite is not None:
-            before_count = len(filtered)
             filtered = [
                 img for img in filtered
                 if img.get("favorite", False) == filters.favorite
             ]
-            logger.info(f"favorite={filters.favorite} 筛选: {before_count} -> {len(filtered)}")
 
         return filtered
 

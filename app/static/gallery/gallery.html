@@ -87,10 +87,12 @@
                         <option value="false">未收藏</option>
                     </select>
                     <select id="page-size-filter" class="filter-select" title="每页显示数量">
+                        <option value="50">50/页</option>
                         <option value="100" selected>100/页</option>
                         <option value="200">200/页</option>
                     </select>
                     <button id="filter-btn" class="btn btn-primary">筛选</button>
+                    <button id="filter-toggle-btn" class="btn btn-secondary filter-toggle-btn">筛选 ▼</button>
                     <button id="reset-btn" class="btn btn-secondary">重置</button>
                 </div>
                 <div class="toolbar-right">
@@ -100,9 +102,6 @@
                     <button id="check-missing-btn" class="btn btn-warning" title="检查失效图片">
                         <span>🔍</span> 检查失效
                     </button>
-                    <button id="upload-btn" class="btn btn-primary" title="上传图片">
-                        <span>📤</span> 上传
-                    </button>
                     <button id="view-grid" class="btn btn-icon active" title="网格视图">
                         <span>⊞</span>
                     </button>
@@ -110,26 +109,21 @@
                         <span>☰</span>
                     </button>
                     <button id="select-all" class="btn btn-secondary">全选</button>
-                    <button id="export-btn" class="btn btn-primary" disabled>导出</button>
                     <button id="delete-btn" class="btn btn-danger" disabled>删除</button>
-                </div>
-            </div>
-
-            <!-- 上传区域 -->
-            <div class="upload-area" id="upload-area">
-                <div class="upload-dropzone" id="upload-dropzone">
-                    <div class="upload-icon">📁</div>
-                    <div class="upload-text">点击或拖拽图片到此处上传</div>
-                    <div class="upload-hint">支持 JPG、PNG、WebP、GIF 格式</div>
-                    <input type="file" id="file-input" accept="image/*" multiple style="display: none;">
                 </div>
             </div>
 
             <!-- 顶部分页 -->
             <div class="pagination pagination-top" id="pagination-top" style="display: none;">
-                <button id="prev-page-top" class="btn btn-secondary" disabled>← 上一页</button>
-                <span id="page-info-top">第 1 页 / 共 1 页</span>
-                <button id="next-page-top" class="btn btn-secondary" disabled>下一页 →</button>
+                <button id="prev-page-top" class="btn btn-secondary btn-page" disabled>←</button>
+                <div id="page-numbers-top" class="page-numbers"></div>
+                <button id="next-page-top" class="btn btn-secondary btn-page" disabled>→</button>
+                <div class="page-jump">
+                    <span class="page-jump-label">第</span>
+                    <input type="number" id="page-jump-input-top" class="page-jump-input" min="1" value="1">
+                    <span class="page-jump-label">页</span>
+                    <button id="page-jump-btn-top" class="btn btn-primary btn-sm">跳转</button>
+                </div>
             </div>
 
             <!-- 图片容器 -->
@@ -153,9 +147,15 @@
 
             <!-- 底部分页 -->
             <div class="pagination" id="pagination" style="display: none;">
-                <button id="prev-page" class="btn btn-secondary" disabled>← 上一页</button>
-                <span id="page-info">第 1 页 / 共 1 页</span>
-                <button id="next-page" class="btn btn-secondary" disabled>下一页 →</button>
+                <button id="prev-page" class="btn btn-secondary btn-page" disabled>←</button>
+                <div id="page-numbers" class="page-numbers"></div>
+                <button id="next-page" class="btn btn-secondary btn-page" disabled>→</button>
+                <div class="page-jump">
+                    <span class="page-jump-label">第</span>
+                    <input type="number" id="page-jump-input" class="page-jump-input" min="1" value="1">
+                    <span class="page-jump-label" id="page-total-label">/ 1 页</span>
+                    <button id="page-jump-btn" class="btn btn-primary btn-sm">跳转</button>
+                </div>
             </div>
         </div>
 
@@ -267,8 +267,7 @@
 
     <script src="/static/common/dialog.js"></script>
     <script src="/static/common/workspace.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="/static/gallery/gallery.js?v=2.0"></script>
+    <script src="/static/gallery/gallery.js?v=3.0"></script>
     <script src="/static/common/admin-auth.js?v=3"></script>
     <script src="/static/common/header.js?v=5"></script>
 </body>

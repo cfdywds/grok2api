@@ -56,6 +56,64 @@ const state = {
     currentImageIndex: -1,
 };
 
+// 图片懒加载 Observer
+let imageObserver = null;
+const UNLOAD_DELAY = 5000; // 离开视口后 5 秒释放 ObjectURL
+const unloadTimers = new WeakMap();
+
+function initImageObserver() {
+    if (imageObserver) imageObserver.disconnect();
+
+    imageObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            const img = entry.target;
+            if (entry.isIntersecting) {
+                // 进入视口：取消待释放定时器，加载图片
+                const timer = unloadTimers.get(img);
+                if (timer) {
+                    clearTimeout(timer);
+                    unloadTimers.delete(img);
+                }
+                if (!img.src || img.src === location.href) {
+                    loadImageBlob(img);
+                }
+            } else {
+                // 离开视口：延迟释放内存
+                if (img.dataset.blobUrl) {
+                    const timer = setTimeout(() => {
+                        unloadImageBlob(img);
+                        unloadTimers.delete(img);
+                    }, UNLOAD_DELAY);
+                    unloadTimers.set(img, timer);
+                }
+            }
+        });
+    }, { rootMargin: '300px' });
+}
+
+function loadImageBlob(img) {
+    const filename = img.dataset.filename;
+    if (!filename || !window.Workspace || !Workspace.getHandle()) return;
+
+    Workspace.getImageURL(filename).then(url => {
+        if (url) {
+            img.dataset.blobUrl = url;
+            img.src = url;
+            img.classList.add('loaded');
+        }
+    }).catch(() => {});
+}
+
+function unloadImageBlob(img) {
+    const blobUrl = img.dataset.blobUrl;
+    if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+        delete img.dataset.blobUrl;
+        img.src = '';
+        img.classList.remove('loaded');
+    }
+}
+
 // Toast 通知系统
 const Toast = {
     show(message, type = 'info', title = '', duration = 3000) {
@@ -330,59 +388,6 @@ async function updateTags(imageId, tags) {
     }
 }
 
-async function exportImages(imageIds) {
-    if (!Workspace.getHandle()) {
-        Toast.warning('请先设置工作目录');
-        return;
-    }
-    try {
-        showLoading();
-        const data = await Workspace.readMetadata();
-        const images = (data.images || []).filter(img => imageIds.includes(img.id));
-
-        if (typeof JSZip === 'undefined') {
-            // JSZip 未加载时，逐个下载
-            for (const img of images) {
-                const url = await Workspace.getImageURL(img.filename);
-                if (!url) continue;
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = img.filename;
-                a.click();
-                await new Promise(resolve => setTimeout(resolve, 200));
-                URL.revokeObjectURL(url);
-            }
-            Toast.success(`已下载 ${images.length} 张图片`);
-            return;
-        }
-
-        const dirHandle = Workspace.getHandle();
-        const zip = new JSZip();
-        for (const img of images) {
-            const fh = await dirHandle.getFileHandle(img.filename);
-            const file = await fh.getFile();
-            zip.file(img.filename, file);
-        }
-
-        const blob = await zip.generateAsync({ type: 'blob' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `images_export_${Date.now()}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-
-        Toast.success('图片导出成功');
-    } catch (error) {
-        console.error('导出图片失败:', error);
-        Toast.error('导出失败，请重试');
-    } finally {
-        hideLoading();
-    }
-}
-
 async function scanLocalImages() {
     const handle = Workspace.getHandle();
     if (!handle) {
@@ -493,72 +498,6 @@ async function checkMissingFiles() {
     }
 }
 
-async function uploadImages(files) {
-    const handle = Workspace.getHandle();
-    if (!handle) {
-        Toast.warning('请先设置工作目录，才能上传图片');
-        return;
-    }
-
-    try {
-        showLoading();
-        let successCount = 0;
-        let failCount = 0;
-
-        for (const file of files) {
-            try {
-                const arrayBuffer = await file.arrayBuffer();
-                const bytes = new Uint8Array(arrayBuffer);
-
-                const fh = await handle.getFileHandle(file.name, { create: true });
-                const writable = await fh.createWritable();
-                await writable.write(bytes);
-                await writable.close();
-
-                const entry = {
-                    id: `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                    filename: file.name,
-                    prompt: '',
-                    model: 'imported',
-                    aspect_ratio: '',
-                    created_at: Date.now(),
-                    file_size: file.size,
-                    tags: ['上传'],
-                    favorite: false,
-                };
-                await Workspace.addImageMetadata(entry);
-                successCount++;
-            } catch (error) {
-                console.error(`上传图片失败 ${file.name}:`, error);
-                failCount++;
-            }
-        }
-
-        if (failCount === 0) {
-            Toast.success(`成功上传 ${successCount} 张图片`);
-        } else {
-            Toast.warning(`上传完成: 成功 ${successCount} 张，失败 ${failCount} 张`);
-        }
-        fetchImages();
-        fetchStats();
-        toggleUploadArea(false);
-    } catch (error) {
-        console.error('上传图片失败:', error);
-        Toast.error('上传失败，请重试');
-    } finally {
-        hideLoading();
-    }
-}
-
-function toggleUploadArea(show) {
-    const uploadArea = document.getElementById('upload-area');
-    if (show) {
-        uploadArea.classList.add('active');
-    } else {
-        uploadArea.classList.remove('active');
-    }
-}
-
 // UI 更新
 function updateStats(stats) {
     document.getElementById('stat-total').textContent = stats.total_count || 0;
@@ -575,6 +514,9 @@ function renderImages() {
     container.className = state.viewMode === 'grid' ? 'images-grid' : 'images-list';
     container.innerHTML = '';
 
+    // 断开旧 observer
+    if (imageObserver) imageObserver.disconnect();
+
     if (state.images.length === 0) {
         showEmpty();
         return;
@@ -590,15 +532,11 @@ function renderImages() {
         container.appendChild(element);
     });
 
-    // 异步加载 ObjectURL（批量，非阻塞）
+    // 使用 IntersectionObserver 懒加载图片
     if (window.Workspace && Workspace.getHandle()) {
+        if (!imageObserver) initImageObserver();
         container.querySelectorAll('img[data-filename]').forEach(img => {
-            const filename = img.dataset.filename;
-            if (filename) {
-                Workspace.getImageURL(filename).then(url => {
-                    if (url) img.src = url;
-                }).catch(() => {});
-            }
+            imageObserver.observe(img);
         });
     }
 }
@@ -617,7 +555,7 @@ function createImageCard(image) {
     card.innerHTML = `
         <input type="checkbox" class="image-card-checkbox" ${isSelected ? 'checked' : ''}>
         <button class="favorite-btn ${favoriteClass}" data-id="${image.id}" title="${image.favorite ? '取消收藏' : '收藏'}">${favoriteIcon}</button>
-        <img src="" data-filename="${image.filename}" alt="${image.prompt}" class="image-card-img">
+        <img src="" data-filename="${image.filename}" alt="${escapeHtml(image.prompt)}" class="image-card-img lazy-image">
         <div class="image-card-info">
             <div class="image-card-prompt">${escapeHtml(image.prompt)}</div>
             <div class="image-card-meta">
@@ -665,7 +603,7 @@ function createImageListItem(image) {
 
     item.innerHTML = `
         <input type="checkbox" class="image-list-checkbox" ${isSelected ? 'checked' : ''}>
-        <img src="" data-filename="${image.filename}" alt="${image.prompt}" class="image-list-img">
+        <img src="" data-filename="${image.filename}" alt="${escapeHtml(image.prompt)}" class="image-list-img lazy-image">
         <div class="image-list-info">
             <div class="image-list-prompt">${escapeHtml(image.prompt)}</div>
             <div class="image-list-meta">
@@ -715,35 +653,100 @@ function updateSelectionUI() {
 
     // 更新按钮状态
     const hasSelection = state.selectedIds.size > 0;
-    document.getElementById('export-btn').disabled = !hasSelection;
     document.getElementById('delete-btn').disabled = !hasSelection;
 }
 
 function updatePagination() {
     const pagination = document.getElementById('pagination');
     const paginationTop = document.getElementById('pagination-top');
-    const pageInfo = document.getElementById('page-info');
-    const pageInfoTop = document.getElementById('page-info-top');
-    const prevBtn = document.getElementById('prev-page');
-    const nextBtn = document.getElementById('next-page');
-    const prevBtnTop = document.getElementById('prev-page-top');
-    const nextBtnTop = document.getElementById('next-page-top');
 
-    if (state.totalPages > 0) {
-        pagination.style.display = 'flex';
-        paginationTop.style.display = 'flex';
+    if (state.totalPages <= 0) {
+        pagination.style.display = 'none';
+        paginationTop.style.display = 'none';
+        return;
+    }
 
-        pageInfo.textContent = `第 ${state.currentPage} 页 / 共 ${state.totalPages} 页`;
-        pageInfoTop.textContent = `第 ${state.currentPage} 页 / 共 ${state.totalPages} 页`;
+    pagination.style.display = 'flex';
+    paginationTop.style.display = 'flex';
+
+    // 生成智能页码
+    const pageNumbers = generatePageNumbers(state.currentPage, state.totalPages);
+
+    // 更新两个分页栏
+    ['', '-top'].forEach(suffix => {
+        const prevBtn = document.getElementById(`prev-page${suffix}`);
+        const nextBtn = document.getElementById(`next-page${suffix}`);
+        const numbersContainer = document.getElementById(`page-numbers${suffix}`);
+        const jumpInput = document.getElementById(`page-jump-input${suffix}`);
 
         prevBtn.disabled = state.currentPage === 1;
         nextBtn.disabled = state.currentPage === state.totalPages;
-        prevBtnTop.disabled = state.currentPage === 1;
-        nextBtnTop.disabled = state.currentPage === state.totalPages;
-    } else {
-        pagination.style.display = 'none';
-        paginationTop.style.display = 'none';
+
+        // 渲染页码按钮
+        numbersContainer.innerHTML = '';
+        pageNumbers.forEach(item => {
+            if (item === '...') {
+                const ellipsis = document.createElement('span');
+                ellipsis.className = 'page-ellipsis';
+                ellipsis.textContent = '...';
+                numbersContainer.appendChild(ellipsis);
+            } else {
+                const btn = document.createElement('button');
+                btn.className = `btn btn-page-num${item === state.currentPage ? ' active' : ''}`;
+                btn.textContent = item;
+                btn.addEventListener('click', () => {
+                    state.currentPage = item;
+                    fetchImages();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+                numbersContainer.appendChild(btn);
+            }
+        });
+
+        // 更新跳页输入框
+        if (jumpInput) {
+            jumpInput.value = state.currentPage;
+            jumpInput.max = state.totalPages;
+        }
+    });
+
+    // 更新总页数标签
+    const totalLabel = document.getElementById('page-total-label');
+    if (totalLabel) totalLabel.textContent = `/ ${state.totalPages} 页`;
+}
+
+function generatePageNumbers(current, total) {
+    if (total <= 7) {
+        return Array.from({ length: total }, (_, i) => i + 1);
     }
+
+    const pages = new Set([1, total, current]);
+    if (current > 1) pages.add(current - 1);
+    if (current < total) pages.add(current + 1);
+
+    const sorted = [...pages].sort((a, b) => a - b);
+    const result = [];
+
+    for (let i = 0; i < sorted.length; i++) {
+        if (i > 0 && sorted[i] - sorted[i - 1] > 1) {
+            result.push('...');
+        }
+        result.push(sorted[i]);
+    }
+
+    return result;
+}
+
+function handlePageJump(inputId) {
+    const input = document.getElementById(inputId);
+    const page = parseInt(input.value);
+    if (isNaN(page) || page < 1 || page > state.totalPages) {
+        Toast.warning(`请输入 1 ~ ${state.totalPages} 之间的页码`);
+        return;
+    }
+    state.currentPage = page;
+    fetchImages();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function showLoading() {
@@ -912,17 +915,6 @@ function initEventListeners() {
         fetchImages();
     });
 
-    // 分页大小变化
-    document.getElementById('page-size-filter').addEventListener('change', (e) => {
-        state.pageSize = parseInt(e.target.value);
-        state.currentPage = 1;
-
-        // 保存用户偏好
-        localStorage.setItem('gallery_page_size', state.pageSize);
-
-        fetchImages();
-    });
-
     // 重置按钮
     document.getElementById('reset-btn').addEventListener('click', () => {
         document.getElementById('search-input').value = '';
@@ -988,12 +980,6 @@ function initEventListeners() {
         updateSelectionUI();
     });
 
-    // 导出
-    document.getElementById('export-btn').addEventListener('click', async () => {
-        if (state.selectedIds.size === 0) return;
-        await exportImages(Array.from(state.selectedIds));
-    });
-
     // 批量删除
     document.getElementById('delete-btn').addEventListener('click', async () => {
         if (state.selectedIds.size === 0) return;
@@ -1054,6 +1040,17 @@ function initEventListeners() {
         }
     });
 
+    // 跳页按钮
+    document.getElementById('page-jump-btn').addEventListener('click', () => handlePageJump('page-jump-input'));
+    document.getElementById('page-jump-btn-top').addEventListener('click', () => handlePageJump('page-jump-input-top'));
+
+    // 跳页输入框 Enter 键
+    ['page-jump-input', 'page-jump-input-top'].forEach(id => {
+        document.getElementById(id).addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handlePageJump(id);
+        });
+    });
+
     // 滑动翻页功能
     initSwipeNavigation();
 
@@ -1079,6 +1076,17 @@ function initEventListeners() {
                 showNextImage();
             } else if (e.key === 'Escape') {
                 closeImageDetail();
+            }
+        } else {
+            // 分页键盘快捷键（非弹窗状态，且不在输入框内）
+            const tag = document.activeElement?.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            if (e.key === 'Home') {
+                e.preventDefault();
+                if (state.currentPage !== 1) { state.currentPage = 1; fetchImages(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                if (state.currentPage !== state.totalPages) { state.currentPage = state.totalPages; fetchImages(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
             }
         }
     });
@@ -1194,6 +1202,28 @@ function initEventListeners() {
         await showImageDetail(state.currentImageId);
     });
 
+    // 移动端筛选折叠切换
+    document.getElementById('filter-toggle-btn').addEventListener('click', () => {
+        const toolbarLeft = document.querySelector('.toolbar-left');
+        const isExpanded = toolbarLeft.classList.toggle('expanded');
+        const btn = document.getElementById('filter-toggle-btn');
+        btn.textContent = isExpanded ? '收起 ▲' : '筛选 ▼';
+
+        // 展开时同时应用筛选
+        if (!isExpanded) {
+            document.getElementById('filter-btn').click();
+        }
+    });
+
+    // 移动端默认页码大小
+    if (window.matchMedia('(max-width: 768px)').matches) {
+        const savedPageSize = localStorage.getItem('gallery_page_size');
+        if (!savedPageSize) {
+            state.pageSize = 50;
+            document.getElementById('page-size-filter').value = '50';
+        }
+    }
+
     // 同步本地按钮
     document.getElementById('scan-btn').addEventListener('click', async () => {
         await scanLocalImages();
@@ -1202,26 +1232,6 @@ function initEventListeners() {
     // 检查失效图片按钮
     document.getElementById('check-missing-btn').addEventListener('click', async () => {
         await checkMissingFiles();
-    });
-
-    // 上传按钮
-    document.getElementById('upload-btn').addEventListener('click', () => {
-        const uploadArea = document.getElementById('upload-area');
-        const isActive = uploadArea.classList.contains('active');
-        toggleUploadArea(!isActive);
-    });
-
-    // 上传区域点击
-    document.getElementById('upload-dropzone').addEventListener('click', () => {
-        document.getElementById('file-input').click();
-    });
-
-    // 文件选择
-    document.getElementById('file-input').addEventListener('change', (e) => {
-        const files = Array.from(e.target.files);
-        if (files.length > 0) {
-            uploadImages(files);
-        }
     });
 
     // 关闭失效图片弹窗
@@ -1268,30 +1278,6 @@ function initEventListeners() {
         }
     });
 
-    // 拖拽上传
-    const dropzone = document.getElementById('upload-dropzone');
-
-    dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropzone.classList.add('dragover');
-    });
-
-    dropzone.addEventListener('dragleave', () => {
-        dropzone.classList.remove('dragover');
-    });
-
-    dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('dragover');
-
-        const files = Array.from(e.dataTransfer.files).filter(file =>
-            file.type.startsWith('image/')
-        );
-
-        if (files.length > 0) {
-            uploadImages(files);
-        }
-    });
 }
 
 // 收藏功能
