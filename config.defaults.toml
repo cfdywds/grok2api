@@ -142,3 +142,15 @@ nsfw_batch_size = 50
 # NSFW 单次最大数量
 nsfw_max_tokens = 1000
 
+
+# ==================== 视频生成 ====================
+[video]
+# 视频生成并发上限
+concurrent = 2
+# 视频流式超时（秒）
+stream_timeout = 300
+# 是否自动超分辨率（生成完成后升级到 HD）
+auto_upscale = true
+# 内容审核拦截后最大重试次数
+moderated_max_retry = 5
+

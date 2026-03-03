@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grok2API - Video 视频工作台</title>
+  <link rel="icon" href="/static/favicon/favicon.ico">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-mono/style.css" rel="stylesheet">
+  <link href="/static/common/common.css?v=3" rel="stylesheet">
+  <link href="/static/video/video.css?v=1" rel="stylesheet">
+  <link href="/static/common/toast.css" rel="stylesheet">
+</head>
+
+<body class="min-h-screen flex flex-col" style="background-color: var(--bg);">
+  <div id="toast-container" class="toast-container"></div>
+  <div id="app-header"></div>
+
+  <main class="flex-1 container mx-auto max-w-6xl px-4 sm:px-6 py-5 sm:py-8 fade-in">
+    <div class="space-y-4 sm:space-y-6">
+      <div>
+        <h2 class="text-2xl font-semibold tracking-tight">Video 视频工作台</h2>
+        <p class="text-[var(--accents-4)] mt-1 text-sm">生成短视频，支持参考图、多种预设风格与视频延长拼接。</p>
+      </div>
+
+      <div class="h-px bg-[var(--border)]"></div>
+
+      <div class="video-main-grid">
+        <!-- 左侧：生成设置 -->
+        <div class="video-main-left">
+          <div class="video-card">
+            <div class="card-title">生成设置</div>
+            <div class="settings-grid">
+              <!-- 提示词 -->
+              <div>
+                <label class="field-label" for="promptInput">提示词</label>
+                <textarea id="promptInput" class="geist-input video-textarea"
+                  placeholder="例如：街头霓虹雨夜，慢镜头，胶片质感"></textarea>
+              </div>
+
+              <!-- 参考图 -->
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="field-label">参考图（可选）</label>
+                  <button id="clearRefBtn" class="text-xs text-[var(--accents-4)] hover:text-[var(--foreground)]"
+                    style="cursor:pointer;">清除</button>
+                </div>
+                <div id="refImageArea" class="image-upload-area">
+                  <img id="refPreview" src="" alt="" style="display:none;">
+                  <span class="upload-text">点击或拖拽上传参考图</span>
+                </div>
+              </div>
+
+              <!-- 比例 & 时长 -->
+              <div class="settings-row">
+                <div>
+                  <label class="field-label" for="aspectRatio">比例</label>
+                  <select id="aspectRatio" class="geist-select">
+                    <option value="16:9">16:9 横屏</option>
+                    <option value="9:16">9:16 竖屏</option>
+                    <option value="3:2" selected>3:2</option>
+                    <option value="2:3">2:3</option>
+                    <option value="1:1">1:1 方形</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label" for="videoLength">时长</label>
+                  <select id="videoLength" class="geist-select">
+                    <option value="6" selected>6 秒</option>
+                    <option value="10">10 秒</option>
+                    <option value="15">15 秒</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- 分辨率 & 风格 -->
+              <div class="settings-row">
+                <div>
+                  <label class="field-label" for="resolution">分辨率</label>
+                  <select id="resolution" class="geist-select">
+                    <option value="480p" selected>480p</option>
+                    <option value="720p">720p</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label" for="preset">风格预设</label>
+                  <select id="preset" class="geist-select">
+                    <option value="normal" selected>Normal 标准</option>
+                    <option value="fun">Fun 趣味</option>
+                    <option value="spicy">Spicy 辛辣</option>
+                    <option value="custom">Custom 自定义</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- 按钮 -->
+              <div class="button-row">
+                <button id="generateBtn" class="geist-button">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  生成视频
+                </button>
+                <button id="stopBtn" class="geist-button geist-button-danger" style="display:none;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="6" y="6" width="12" height="12"></rect>
+                  </svg>
+                  停止
+                </button>
+              </div>
+
+              <!-- 延长按钮 -->
+              <button id="extendBtn" class="geist-button-outline" style="display:none;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M5 12h14M12 5l7 7-7 7"></path>
+                </svg>
+                延长视频
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧：视频预览区 -->
+        <div class="video-main-right">
+          <div class="video-card">
+            <div class="card-title">视频预览</div>
+            <div class="video-result-area">
+              <!-- 进度条 -->
+              <div class="progress-bar">
+                <div id="progressFill" class="progress-bar-fill"></div>
+              </div>
+              <p id="statusText" class="status-text">准备就绪</p>
+
+              <!-- 视频占位 -->
+              <div id="videoPlaceholder" class="video-placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                  <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" opacity="0.3"></polygon>
+                </svg>
+                <p>生成的视频将在此处播放</p>
+              </div>
+
+              <!-- 视频播放器 -->
+              <div id="playerWrapper" class="video-player-wrapper" style="display:none;">
+                <video id="videoPlayer" controls preload="auto" playsinline></video>
+              </div>
+            </div>
+          </div>
+
+          <!-- 历史记录 -->
+          <div class="video-card" style="margin-top:1rem;">
+            <div class="card-title">历史记录</div>
+            <div id="videoHistory" class="video-history"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div id="app-footer"></div>
+
+  <script src="/static/common/common.js?v=3"></script>
+  <script src="/static/video/video.js?v=1"></script>
+</body>
+
+</html>

@@ -51,6 +51,16 @@ class VideoConfig(BaseModel):
     video_length: Optional[int] = Field(6, description="视频时长(秒): 6 / 10 / 15")
     resolution_name: Optional[str] = Field("480p", description="视频分辨率: 480p, 720p")
     preset: Optional[str] = Field("custom", description="风格预设: fun, normal, spicy")
+    # 视频延长参数
+    extend_post_id: Optional[str] = Field(None, description="要延长的视频 post ID")
+    video_extension_start_time: Optional[float] = Field(None, description="延长起始时间(秒)")
+    original_post_id: Optional[str] = Field(None, description="原始视频 post ID")
+    file_attachment_id: Optional[str] = Field(None, description="文件附件 ID")
+    stitch_with_extend: Optional[bool] = Field(True, description="是否拼接延长视频")
+    parent_post_id: Optional[str] = Field(None, description="已有图片 parent post ID")
+    source_image_url: Optional[str] = Field(None, description="源图片 URL")
+    n: Optional[int] = Field(None, ge=1, le=4, description="生成数量 (1-4，仅非流式)")
+    concurrent: Optional[int] = Field(1, ge=1, le=4, description="并发数 (1-4)")
 
     @field_validator("aspect_ratio")
     @classmethod
@@ -274,6 +284,13 @@ async def chat_completions(request: ChatCompletionRequest):
             video_length=v_conf.video_length,
             resolution=v_conf.resolution_name,
             preset=v_conf.preset,
+            parent_post_id=v_conf.parent_post_id,
+            extend_post_id=v_conf.extend_post_id,
+            video_extension_start_time=v_conf.video_extension_start_time,
+            original_post_id=v_conf.original_post_id,
+            file_attachment_id=v_conf.file_attachment_id,
+            stitch_with_extend=v_conf.stitch_with_extend if v_conf.stitch_with_extend is not None else True,
+            source_image_url=v_conf.source_image_url,
         )
     else:
         result = await ChatService.completions(

@@ -286,6 +286,12 @@ async def admin_img2img_page():
     return await render_template("img2img/img2img.html")
 
 
+@router.get("/admin/video", response_class=HTMLResponse, include_in_schema=False)
+async def admin_video_page():
+    """视频工作台页面"""
+    return await render_template("video/video.html")
+
+
 class VoiceTokenResponse(BaseModel):
     token: str
     url: str
