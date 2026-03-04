@@ -815,8 +815,12 @@ class VideoService:
                         for attach_type, attach_data in attachments:
                             if attach_type == "image":
                                 _, file_uri = await upload_service.upload(attach_data, token)
-                                image_url = f"https://assets.grok.com/{file_uri}"
-                                logger.info(f"Image uploaded for video: {image_url}")
+                                # file_uri 可能是完整 URL 或相对路径，防御性处理
+                                if file_uri.startswith("http"):
+                                    image_url = file_uri
+                                else:
+                                    image_url = f"https://assets.grok.com/{file_uri.lstrip('/')}"
+                                logger.info(f"Image uploaded for video: {image_url} (file_uri={file_uri})")
                                 break
                     finally:
                         await upload_service.close()

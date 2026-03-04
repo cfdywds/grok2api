@@ -18,7 +18,7 @@ from curl_cffi.requests.errors import RequestsError
 
 from app.core.config import get_config
 from app.core.logger import logger
-from app.core.exceptions import UpstreamException
+from app.core.exceptions import AppException, UpstreamException
 from .base import (
     BaseProcessor,
     StreamIdleTimeoutError,
@@ -248,6 +248,9 @@ class VideoStreamProcessor(BaseProcessor):
                 message=f"Upstream request failed: {e}",
                 details={"error": str(e)},
             )
+        except AppException:
+            # 业务异常（含审核拦截、上游错误等）直接向上传播，由路由层统一处理
+            raise
         except Exception as e:
             logger.error(
                 f"Video stream processing error: {e}",
