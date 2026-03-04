@@ -327,7 +327,14 @@ class UploadService(BaseService):
 
                     # 认证失败
                     if response.status_code in (401, 403):
-                        logger.warning(f"Upload auth failed: {response.status_code}")
+                        # 记录响应体，帮助诊断是 Cloudflare WAF 拦截还是 token 认证失败
+                        try:
+                            resp_body = response.text[:500]
+                        except Exception:
+                            resp_body = "<unreadable>"
+                        logger.warning(
+                            f"Upload auth failed: {response.status_code} | body={resp_body}"
+                        )
                         try:
                             await TokenService.record_fail(
                                 token, response.status_code, "upload_auth_failed"
@@ -337,7 +344,8 @@ class UploadService(BaseService):
 
                         raise UpstreamException(
                             message=f"Upload authentication failed: {response.status_code}",
-                            details={"status": response.status_code, "token_invalidated": True},
+                            # token_invalidated=False 使上层不再重试（403 对上传是永久性拦截）
+                            details={"status": response.status_code, "token_invalidated": False},
                         )
 
                     # 其他错误
@@ -367,7 +375,11 @@ class UploadService(BaseService):
             # 使用重试机制执行上传
             def extract_status(e: Exception) -> Optional[int]:
                 if isinstance(e, UpstreamException) and e.details:
-                    return e.details.get("status")
+                    status = e.details.get("status")
+                    # 403 上传拦截为永久性（Cloudflare WAF / token 权限不足），不重试
+                    if status == 403:
+                        return None
+                    return status
                 return None
 
             try:

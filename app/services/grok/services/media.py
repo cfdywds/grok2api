@@ -29,7 +29,7 @@ from app.core.exceptions import (
 from app.services.grok.models.model import ModelService
 from app.services.token import get_token_manager, EffortType
 from app.services.grok.processors import VideoStreamProcessor, VideoCollectProcessor
-from app.services.grok.utils.headers import build_grok_headers
+from app.services.grok.utils.headers import build_grok_headers, build_sso_cookie
 from app.services.grok.utils.stream import wrap_stream_with_usage
 from app.services.grok.processors.base import _normalize_stream_line
 
@@ -83,6 +83,12 @@ def _classify_video_error(exc: Exception) -> tuple[str, str, int]:
     if isinstance(details, dict):
         body = str(details.get("body") or "").lower()
     merged = f"{text}\n{body}"
+
+    if (
+        "upload authentication failed" in merged
+        or "upload auth failed" in merged
+    ):
+        return ("视频生成失败：图片上传被拒绝（403），请配置代理后重试", "upload_auth_failed", 502)
 
     if (
         "blocked by moderation" in merged
@@ -244,11 +250,14 @@ class VideoService:
     # ==================== 请求构造 ====================
 
     def _build_headers(
-        self, token: str, referer: str = "https://grok.com/imagine"
+        self, token: str, referer: str = "https://grok.com/imagine", include_rw: bool = False
     ) -> dict:
         """构建请求头"""
         headers = build_grok_headers(token)
         headers["Referer"] = referer
+        if include_rw:
+            # 写操作需要 sso-rw cookie 授权（同 assets.py 的上传/删除逻辑）
+            headers["Cookie"] = build_sso_cookie(token, include_rw=True)
         return headers
 
     def _build_proxies(self) -> Optional[dict]:
@@ -266,7 +275,8 @@ class VideoService:
     ) -> str:
         """创建媒体帖子，返回 post ID"""
         try:
-            headers = self._build_headers(token)
+            # create_post 是写操作，需要 sso-rw cookie
+            headers = self._build_headers(token, include_rw=True)
 
             if media_type == "MEDIA_POST_TYPE_IMAGE" and media_url:
                 payload = {"mediaType": media_type, "mediaUrl": media_url}
@@ -284,7 +294,13 @@ class VideoService:
                 )
 
             if response.status_code != 200:
-                logger.error(f"Create post failed: {response.status_code}")
+                try:
+                    resp_body = response.text[:300]
+                except Exception:
+                    resp_body = "<unreadable>"
+                logger.error(
+                    f"Create post failed: {response.status_code} | body={resp_body}"
+                )
                 raise UpstreamException(
                     f"Failed to create post: {response.status_code}"
                 )
