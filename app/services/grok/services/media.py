@@ -491,8 +491,12 @@ class VideoService:
 
         async with _get_semaphore():
             post_id = await self.create_image_post(token, image_url)
+            # 用 imagine-public.x.ai 格式的 URL 作为消息里的图片引用
+            # assets.grok.com URL 是文件附件系统，Grok 视频 AI 不认识，会触发误审核
+            # imagine-public.x.ai 是 Grok 自己的图片系统，视频 AI 能正确识别
+            imagine_url = self._build_imagine_public_url(post_id)
             message = self._build_video_message(
-                prompt=prompt, preset=preset, source_image_url=image_url,
+                prompt=prompt, preset=preset, source_image_url=imagine_url,
             )
             model_config_override = {
                 "modelMap": {
