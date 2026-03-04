@@ -77,6 +77,11 @@ GROK_DEFAULTS = {
         "nsfw_batch_size": 50,
         "nsfw_max_tokens": 1000,
     },
+    "video": {
+        "auto_upscale": True,
+        "moderated_max_retry": 5,
+        "avoid_cjk_text": True,
+    },
 }
 
 

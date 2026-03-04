@@ -273,6 +273,65 @@ const _WS = (() => {
     }
   }
 
+  // ── 视频元数据 I/O ──────────────────────────────────────────────────────
+
+  const VIDEO_METADATA_FILE = 'video_metadata.json';
+
+  /**
+   * 读取 video_metadata.json，返回解析后的对象
+   * @returns {{ version: string, videos: Array }}
+   */
+  async function readVideoMetadata() {
+    if (!_dirHandle) return { version: '1.0', videos: [] };
+    try {
+      const fh = await _dirHandle.getFileHandle(VIDEO_METADATA_FILE);
+      const file = await fh.getFile();
+      return JSON.parse(await file.text());
+    } catch (e) {
+      return { version: '1.0', videos: [] };
+    }
+  }
+
+  /**
+   * 写入 video_metadata.json
+   * @param {{ version: string, videos: Array }} data
+   */
+  async function writeVideoMetadata(data) {
+    if (!_dirHandle) throw new Error('workspace not set');
+    const fh = await _dirHandle.getFileHandle(VIDEO_METADATA_FILE, { create: true });
+    const writable = await fh.createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
+    await writable.close();
+  }
+
+  /**
+   * 追加一条视频元数据（prepend，保持最新在前）
+   * @param {object} entry
+   */
+  async function addVideoMetadata(entry) {
+    const data = await readVideoMetadata();
+    data.videos.unshift(entry);
+    await writeVideoMetadata(data);
+  }
+
+  // ── 视频文件 I/O ──────────────────────────────────────────────────────────
+
+  /**
+   * 从 URL 下载视频并保存到工作目录
+   * @param {string} url - 视频 URL
+   * @param {string} filename - 保存的文件名
+   */
+  async function saveVideoFromURL(url, filename) {
+    if (!_dirHandle) throw new Error('workspace not set');
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`fetch video failed: HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    const fh = await _dirHandle.getFileHandle(filename, { create: true });
+    const writable = await fh.createWritable();
+    await writable.write(blob);
+    await writable.close();
+  }
+
   // ── 提示词 I/O ────────────────────────────────────────────────────────────
 
   const PROMPTS_FILE = 'prompts.json';
@@ -360,6 +419,10 @@ const _WS = (() => {
     addPrompt,
     updatePrompt,
     removePrompt,
+    readVideoMetadata,
+    writeVideoMetadata,
+    addVideoMetadata,
+    saveVideoFromURL,
   };
 })();
 

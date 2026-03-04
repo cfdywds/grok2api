@@ -36,6 +36,17 @@ from app.services.grok.processors.base import _normalize_stream_line
 CREATE_POST_API = "https://grok.com/rest/media/post/create"
 CHAT_API = "https://grok.com/rest/app-chat/conversations/new"
 
+# CJK 字符回避指令（追加到视频 prompt，减少画面内中文乱码）
+_CJK_AVOIDANCE_SUFFIX = (
+    "(IMPORTANT: All text visible in the video must use English/Latin characters only. "
+    "Never render Chinese/Japanese/Korean characters as visible text in the video.)"
+)
+
+_CJK_RANGE = re.compile(
+    r"[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff"
+    r"\uac00-\ud7af\uf900-\ufaff]"
+)
+
 _MEDIA_SEMAPHORE = None
 _MEDIA_SEM_VALUE = 0
 
@@ -186,10 +197,16 @@ class VideoService:
         """构造视频请求 message：
         - 有提示词：统一走 custom，并发送 image_url + prompt + mode
         - 无提示词：根据所选 preset 转换 mode
+        - CJK 回避：检测到中日韩字符时追加英文渲染指令
         """
         prompt_text = (prompt or "").strip()
         if not VideoService.is_meaningful_video_prompt(prompt_text):
             prompt_text = ""
+
+        # 检测 CJK 字符 → 追加回避指令
+        avoid_cjk = bool(get_config("video.avoid_cjk_text", True))
+        if avoid_cjk and prompt_text and _CJK_RANGE.search(prompt_text):
+            prompt_text = f"{prompt_text} {_CJK_AVOIDANCE_SUFFIX}"
 
         image_core = (source_image_url or "").strip()
         if prompt_text:
@@ -419,6 +436,7 @@ class VideoService:
             model_config_override = {
                 "modelMap": {
                     "videoGenModelConfig": {
+                        "mode": official_mode,
                         "aspectRatio": aspect_ratio,
                         "parentPostId": post_id,
                         "resolutionName": resolution_name,
@@ -427,6 +445,10 @@ class VideoService:
                     }
                 }
             }
+            logger.debug(
+                f"Video generate config: videoLength={video_length}, "
+                f"mode={official_mode}, ratio={aspect_ratio}, res={resolution_name}"
+            )
             return await self._stream_with_moderation_retry(
                 token, message, model_config_override, official_mode, post_id
             )
@@ -459,6 +481,7 @@ class VideoService:
             model_config_override = {
                 "modelMap": {
                     "videoGenModelConfig": {
+                        "mode": official_mode,
                         "aspectRatio": aspect_ratio,
                         "parentPostId": post_id,
                         "resolutionName": resolution,
@@ -467,6 +490,10 @@ class VideoService:
                     }
                 }
             }
+            logger.debug(
+                f"Image-to-video config: videoLength={video_length}, "
+                f"mode={official_mode}, ratio={aspect_ratio}, res={resolution}"
+            )
             return await self._stream_with_moderation_retry(
                 token, message, model_config_override, official_mode, post_id
             )
@@ -509,6 +536,7 @@ class VideoService:
         model_config_override = {
             "modelMap": {
                 "videoGenModelConfig": {
+                    "mode": official_mode,
                     "aspectRatio": aspect_ratio,
                     "parentPostId": parent_post_id,
                     "resolutionName": resolution,
@@ -545,6 +573,11 @@ class VideoService:
         else:
             mode = self._map_preset_to_mode(preset)
             prompt_text = ""
+
+        # CJK 回避
+        avoid_cjk = bool(get_config("video.avoid_cjk_text", True))
+        if avoid_cjk and prompt_text and _CJK_RANGE.search(prompt_text):
+            prompt_text = f"{prompt_text} {_CJK_AVOIDANCE_SUFFIX}"
 
         effective_original = (original_post_id or "").strip() or extend_post_id
         effective_file_attachment = (file_attachment_id or "").strip() or effective_original

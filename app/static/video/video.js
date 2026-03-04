@@ -29,6 +29,9 @@
   const playerWrapper = () => $('#playerWrapper');
   const refImageArea = () => $('#refImageArea');
   const refPreview = () => $('#refPreview');
+  const autoSaveToggle = () => $('#autoSaveToggle');
+  const selectFolderBtn = () => $('#selectFolderBtn');
+  const folderPathEl = () => $('#folderPath');
 
   // ==================== API ====================
   function getAuthHeaders() {
@@ -246,6 +249,58 @@
 
     // 添加到历史
     addToHistory(url);
+
+    // 自动保存到工作目录
+    autoSaveVideo(url);
+  }
+
+  /**
+   * 自动保存视频到工作目录或降级为浏览器下载
+   */
+  async function autoSaveVideo(url) {
+    const toggle = autoSaveToggle();
+    if (!toggle || !toggle.checked) return;
+
+    const timestamp = Date.now();
+    const filename = `video_${timestamp}.mp4`;
+
+    // 优先使用 File System Access API
+    if (typeof Workspace !== 'undefined' && Workspace.getHandle()) {
+      try {
+        await Workspace.saveVideoFromURL(url, filename);
+        const entry = {
+          id: `vid_${timestamp}_${Math.random().toString(36).substr(2, 6)}`,
+          filename,
+          prompt: (promptInput()?.value || '').trim(),
+          aspect_ratio: aspectSelect()?.value || '3:2',
+          resolution: resolutionSelect()?.value || '480p',
+          video_length: parseInt(lengthSelect()?.value || '6'),
+          preset: presetSelect()?.value || 'normal',
+          source_url: url,
+          created_at: timestamp,
+          tags: [],
+          favorite: false,
+        };
+        await Workspace.addVideoMetadata(entry);
+        showToast('视频已保存到工作目录: ' + filename, 'success');
+      } catch (e) {
+        console.warn('[video] auto save failed:', e);
+        showToast('自动保存失败: ' + e.message, 'error');
+      }
+    } else {
+      // 降级为浏览器下载
+      try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showToast('已触发浏览器下载: ' + filename, 'success');
+      } catch (e) {
+        console.warn('[video] browser download failed:', e);
+      }
+    }
   }
 
   function showPlayer(show) {
@@ -380,8 +435,74 @@
     $('#clearRefBtn')?.addEventListener('click', clearRefImage);
 
     setupImageUpload();
+    setupAutoSave();
     updateUI();
     setProgress(0, '准备就绪');
+  }
+
+  /**
+   * 初始化自动保存：workspace 恢复 + 事件绑定
+   */
+  function setupAutoSave() {
+    const toggle = autoSaveToggle();
+    const btn = selectFolderBtn();
+    const pathEl = folderPathEl();
+
+    // 不支持 File System API 时禁用目录选择
+    if (typeof Workspace === 'undefined' || !Workspace.isSupported()) {
+      if (btn) {
+        btn.disabled = true;
+        btn.title = (typeof Workspace !== 'undefined' && Workspace.getUnsupportedReason())
+          || '当前浏览器不支持 File System Access API';
+      }
+    }
+
+    // 开关联动目录选择按钮
+    if (toggle && btn) {
+      toggle.addEventListener('change', () => {
+        if (toggle.checked && typeof Workspace !== 'undefined' && Workspace.isSupported()) {
+          btn.disabled = false;
+        } else if (!toggle.checked) {
+          btn.disabled = true;
+        }
+      });
+    }
+
+    // 目录选择按钮
+    if (btn) {
+      btn.addEventListener('click', async () => {
+        if (typeof Workspace === 'undefined') return;
+        try {
+          const handle = await Workspace.requestWorkspace();
+          if (pathEl) {
+            pathEl.textContent = handle.name;
+            btn.style.color = '#059669';
+          }
+          showToast('已选择保存位置: ' + handle.name, 'success');
+        } catch (e) {
+          if (e.name !== 'AbortError') {
+            showToast('选择目录失败', 'error');
+          }
+        }
+      });
+    }
+
+    // 尝试从 IndexedDB 恢复已有目录
+    if (typeof Workspace !== 'undefined' && Workspace.isSupported()) {
+      Workspace.initWorkspace().then(handle => {
+        if (!handle) return;
+        handle.queryPermission({ mode: 'readwrite' }).then(perm => {
+          if (perm === 'granted') {
+            if (pathEl) pathEl.textContent = handle.name;
+            if (btn) btn.style.color = '#059669';
+            if (toggle) {
+              toggle.checked = true;
+              if (btn) btn.disabled = false;
+            }
+          }
+        });
+      }).catch(() => {});
+    }
   }
 
   if (document.readyState === 'loading') {

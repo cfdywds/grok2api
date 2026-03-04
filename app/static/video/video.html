@@ -95,6 +95,27 @@
                 </div>
               </div>
 
+              <!-- 自动保存设置 -->
+              <div class="settings-autosave">
+                <div class="settings-toggle">
+                  <label class="field-label" for="autoSaveToggle">自动保存</label>
+                  <label class="toggle">
+                    <input id="autoSaveToggle" type="checkbox">
+                    <span class="toggle-track"></span>
+                    <span class="toggle-label">自动保存视频到本地</span>
+                  </label>
+                </div>
+                <div class="settings-folder">
+                  <label class="field-label">保存位置</label>
+                  <button id="selectFolderBtn" class="geist-button-outline folder-select-btn" disabled>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span id="folderPath">浏览器默认位置</span>
+                  </button>
+                </div>
+              </div>
+
               <!-- 按钮 -->
               <div class="button-row">
                 <button id="generateBtn" class="geist-button">
@@ -161,8 +182,12 @@
 
   <div id="app-footer"></div>
 
-  <script src="/static/common/common.js?v=3"></script>
-  <script src="/static/video/video.js?v=1"></script>
+  <script src="/static/common/admin-auth.js?v=3"></script>
+  <script src="/static/common/header.js?v=5"></script>
+  <script src="/static/common/footer.js?v=1"></script>
+  <script src="/static/common/toast.js"></script>
+  <script src="/static/common/workspace.js"></script>
+  <script src="/static/video/video.js?v=2"></script>
 </body>
 
 </html>
