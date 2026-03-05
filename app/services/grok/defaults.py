@@ -17,6 +17,8 @@ GROK_DEFAULTS = {
         "timeout": 120,
         "base_proxy_url": "",
         "asset_proxy_url": "",
+        "grok_base_url": "",
+        "grok_proxy_token": "",
     },
     "security": {
         "cf_clearance": "",

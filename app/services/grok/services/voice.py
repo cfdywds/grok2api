@@ -11,8 +11,9 @@ from app.core.logger import logger
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException
 from app.services.grok.utils.headers import build_grok_headers
+from app.services.grok.utils.urls import grok_url
 
-LIVEKIT_TOKEN_API = "https://grok.com/rest/livekit/tokens"
+LIVEKIT_TOKEN_API = "/rest/livekit/tokens"
 
 
 class VoiceService:
@@ -49,7 +50,7 @@ class VoiceService:
             timeout = get_config("network.timeout")
             async with AsyncSession(impersonate=browser) as session:
                 response = await session.post(
-                    LIVEKIT_TOKEN_API,
+                    grok_url(LIVEKIT_TOKEN_API),
                     headers=headers,
                     data=orjson.dumps(payload),
                     timeout=timeout,

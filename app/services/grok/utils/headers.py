@@ -9,6 +9,7 @@ from typing import Dict
 
 from app.core.config import get_config
 from app.services.grok.utils.statsig import StatsigService
+from app.services.grok.utils.urls import apply_proxy_token
 
 
 def _normalize_token(token: str) -> str:
@@ -59,5 +60,6 @@ def build_grok_headers(token: str) -> Dict[str, str]:
 
     apply_statsig(headers)
     headers["Cookie"] = build_sso_cookie(token)
+    apply_proxy_token(headers)
 
     return headers

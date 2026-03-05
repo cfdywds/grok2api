@@ -28,13 +28,14 @@ from app.core.logger import logger
 from app.core.storage import DATA_DIR
 from app.services.grok.utils.headers import apply_statsig, build_sso_cookie, build_grok_headers
 from app.services.grok.utils.retry import retry_on_status
+from app.services.grok.utils.urls import grok_url
 from app.services.token.service import TokenService
 
 # ==================== 常量 ====================
 
-UPLOAD_API = "https://grok.com/rest/app-chat/upload-file"
-LIST_API = "https://grok.com/rest/assets"
-DELETE_API = "https://grok.com/rest/assets-metadata"
+UPLOAD_API = "/rest/app-chat/upload-file"
+LIST_API = "/rest/assets"
+DELETE_API = "/rest/assets-metadata"
 DOWNLOAD_API = "https://assets.grok.com"
 LOCK_DIR = DATA_DIR / ".locks"
 
@@ -309,7 +310,7 @@ class UploadService(BaseService):
 
                 try:
                     response = await session.post(
-                        UPLOAD_API,
+                        grok_url(UPLOAD_API),
                         headers=self._build_headers(token),
                         json={"fileName": filename, "fileMimeType": mime, "content": b64},
                         impersonate=self.config.browser,
@@ -420,7 +421,7 @@ class ListService(BaseService):
                     params.pop("pageToken", None)
 
                 response = await session.get(
-                    LIST_API,
+                    grok_url(LIST_API),
                     headers=headers,
                     params=params,
                     impersonate=self.config.browser,
@@ -470,7 +471,7 @@ class DeleteService(BaseService):
         async with _get_assets_semaphore():
             session = await self._get_session()
             response = await session.delete(
-                f"{DELETE_API}/{asset_id}",
+                f"{grok_url(DELETE_API)}/{asset_id}",
                 headers=self._build_headers(token, referer="https://grok.com/files"),
                 impersonate=self.config.browser,
                 timeout=self.config.timeout,

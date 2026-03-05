@@ -20,6 +20,13 @@ timeout = 120
 base_proxy_url = ""
 # 资源代理地址（代理静态资源如图片/视频）
 asset_proxy_url = ""
+# Grok API 基础地址（Cloudflare Workers 反代）
+# 留空则使用默认 https://grok.com
+# 示例: "https://your-worker.workers.dev"
+grok_base_url = ""
+# CF Worker 鉴权 Token（对应 Worker 环境变量 AUTH_TOKEN）
+# 留空则不鉴权
+grok_proxy_token = ""
 
 
 # ==================== 反爬虫验证 ====================

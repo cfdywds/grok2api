@@ -12,8 +12,9 @@ from app.core.config import get_config
 from app.core.exceptions import UpstreamException
 from app.services.grok.utils.headers import apply_statsig, build_sso_cookie
 from app.services.grok.utils.retry import retry_on_status
+from app.services.grok.utils.urls import grok_url, apply_proxy_token
 
-LIMITS_API = "https://grok.com/rest/rate-limits"
+LIMITS_API = "/rest/rate-limits"
 
 _USAGE_SEMAPHORE = asyncio.Semaphore(25)
 _USAGE_SEM_VALUE = 25
@@ -54,6 +55,7 @@ class UsageService:
 
         apply_statsig(headers)
         headers["Cookie"] = build_sso_cookie(token)
+        apply_proxy_token(headers)
 
         return headers
 
@@ -101,7 +103,7 @@ class UsageService:
 
                     async with AsyncSession() as session:
                         response = await session.post(
-                            LIMITS_API,
+                            grok_url(LIMITS_API),
                             headers=headers,
                             json=payload,
                             impersonate=browser,

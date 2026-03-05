@@ -14,8 +14,9 @@ from app.core.logger import logger
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException
 from app.services.grok.utils.headers import build_grok_headers
+from app.services.grok.utils.urls import grok_url
 
-VIDEO_UPSCALE_API = "https://grok.com/rest/media/video/upscale"
+VIDEO_UPSCALE_API = "/rest/media/video/upscale"
 
 
 def extract_video_id(video_url: str) -> str:
@@ -59,7 +60,7 @@ class VideoUpscaleService:
 
             async with AsyncSession() as session:
                 response = await session.post(
-                    VIDEO_UPSCALE_API,
+                    grok_url(VIDEO_UPSCALE_API),
                     headers=headers,
                     json=payload,
                     timeout=get_config("network.timeout"),

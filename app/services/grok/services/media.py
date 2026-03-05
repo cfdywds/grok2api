@@ -31,10 +31,11 @@ from app.services.token import get_token_manager, EffortType
 from app.services.grok.processors import VideoStreamProcessor, VideoCollectProcessor
 from app.services.grok.utils.headers import build_grok_headers, build_sso_cookie
 from app.services.grok.utils.stream import wrap_stream_with_usage
+from app.services.grok.utils.urls import grok_url
 from app.services.grok.processors.base import _normalize_stream_line
 
-CREATE_POST_API = "https://grok.com/rest/media/post/create"
-CHAT_API = "https://grok.com/rest/app-chat/conversations/new"
+CREATE_POST_API = "/rest/media/post/create"
+CHAT_API = "/rest/app-chat/conversations/new"
 
 # CJK 字符回避指令（追加到视频 prompt，减少画面内中文乱码）
 _CJK_AVOIDANCE_SUFFIX = (
@@ -285,7 +286,7 @@ class VideoService:
 
             async with AsyncSession() as session:
                 response = await session.post(
-                    CREATE_POST_API,
+                    grok_url(CREATE_POST_API),
                     headers=headers,
                     json=payload,
                     impersonate=get_config("security.browser"),
@@ -295,9 +296,9 @@ class VideoService:
 
             if response.status_code != 200:
                 try:
-                    resp_body = response.text[:300]
+                    resp_body = response.text[:300].replace("<", "\\<").replace(">", "\\>")
                 except Exception:
-                    resp_body = "<unreadable>"
+                    resp_body = "(unreadable)"
                 logger.error(
                     f"Create post failed: {response.status_code} | body={resp_body}"
                 )
@@ -371,7 +372,7 @@ class VideoService:
                     }
 
                     response = await session.post(
-                        CHAT_API,
+                        grok_url(CHAT_API),
                         headers=headers,
                         data=orjson.dumps(payload),
                         timeout=self.timeout,
@@ -665,7 +666,7 @@ class VideoService:
                     }
 
                     response = await session.post(
-                        CHAT_API,
+                        grok_url(CHAT_API),
                         headers=headers,
                         data=orjson.dumps(payload),
                         timeout=self.timeout,

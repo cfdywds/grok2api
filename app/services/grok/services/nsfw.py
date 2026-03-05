@@ -19,9 +19,10 @@ from app.services.grok.protocols.grpc_web import (
     get_grpc_status,
 )
 from app.services.grok.utils.headers import build_sso_cookie
+from app.services.grok.utils.urls import grok_url, apply_proxy_token
 
-NSFW_API = "https://grok.com/auth_mgmt.AuthManagement/UpdateUserFeatureControls"
-BIRTH_DATE_API = "https://grok.com/rest/auth/set-birth-date"
+NSFW_API = "/auth_mgmt.AuthManagement/UpdateUserFeatureControls"
+BIRTH_DATE_API = "/rest/auth/set-birth-date"
 
 
 @dataclass
@@ -63,7 +64,7 @@ class NSFWService:
         """构造 gRPC-Web 请求头"""
         cookie = build_sso_cookie(token, include_rw=True)
         user_agent = get_config("security.user_agent")
-        return {
+        headers = {
             "accept": "*/*",
             "content-type": "application/grpc-web+proto",
             "origin": "https://grok.com",
@@ -73,12 +74,14 @@ class NSFWService:
             "x-user-agent": "connect-es/2.1.1",
             "cookie": cookie,
         }
+        apply_proxy_token(headers)
+        return headers
 
     def _build_birth_headers(self, token: str) -> dict:
         """构造设置出生日期请求头"""
         cookie = build_sso_cookie(token, include_rw=True)
         user_agent = get_config("security.user_agent")
-        return {
+        headers = {
             "accept": "*/*",
             "content-type": "application/json",
             "origin": "https://grok.com",
@@ -86,6 +89,8 @@ class NSFWService:
             "user-agent": user_agent,
             "cookie": cookie,
         }
+        apply_proxy_token(headers)
+        return headers
 
     @staticmethod
     def _build_payload() -> bytes:
@@ -108,7 +113,7 @@ class NSFWService:
 
         try:
             response = await session.post(
-                BIRTH_DATE_API,
+                grok_url(BIRTH_DATE_API),
                 json=payload,
                 headers=headers,
                 timeout=self.timeout,
@@ -141,7 +146,7 @@ class NSFWService:
                 # 开启 NSFW
                 logger.info(f"Enabling NSFW for token: {token[:10]}...")
                 response = await session.post(
-                    NSFW_API,
+                    grok_url(NSFW_API),
                     data=payload,
                     headers=headers,
                     timeout=self.timeout,

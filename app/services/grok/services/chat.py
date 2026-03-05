@@ -22,10 +22,11 @@ from app.services.grok.processors import StreamProcessor, CollectProcessor
 from app.services.grok.utils.retry import retry_on_status
 from app.services.grok.utils.headers import build_grok_headers
 from app.services.grok.utils.stream import wrap_stream_with_usage
+from app.services.grok.utils.urls import grok_url
 from app.services.token import get_token_manager, EffortType
 
 
-CHAT_API = "https://grok.com/rest/app-chat/conversations/new"
+CHAT_API = "/rest/app-chat/conversations/new"
 
 
 @dataclass
@@ -257,7 +258,7 @@ class GrokChatService:
             session = AsyncSession(impersonate=browser)
             try:
                 response = await session.post(
-                    CHAT_API,
+                    grok_url(CHAT_API),
                     headers=headers,
                     data=orjson.dumps(payload),
                     timeout=timeout,

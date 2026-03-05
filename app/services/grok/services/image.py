@@ -18,8 +18,9 @@ from aiohttp_socks import ProxyConnector
 from app.core.config import get_config
 from app.core.logger import logger
 from app.services.grok.utils.headers import build_sso_cookie
+from app.services.grok.utils.urls import grok_ws_url, apply_proxy_token
 
-WS_URL = "wss://grok.com/ws/imagine/listen"
+WS_URL = "/ws/imagine/listen"
 
 
 class _BlockedError(Exception):
@@ -50,7 +51,7 @@ class ImageService:
     def _get_ws_headers(self, token: str) -> Dict[str, str]:
         cookie = build_sso_cookie(token, include_rw=True)
         user_agent = get_config("security.user_agent")
-        return {
+        headers = {
             "Cookie": cookie,
             "Origin": "https://grok.com",
             "User-Agent": user_agent,
@@ -58,6 +59,8 @@ class ImageService:
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
         }
+        apply_proxy_token(headers)
+        return headers
 
     def _extract_image_id(self, url: str) -> Optional[str]:
         match = self._url_pattern.search(url or "")
@@ -155,7 +158,7 @@ class ImageService:
         try:
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.ws_connect(
-                    WS_URL,
+                    grok_ws_url(WS_URL),
                     headers=headers,
                     heartbeat=20,
                     receive_timeout=timeout,
