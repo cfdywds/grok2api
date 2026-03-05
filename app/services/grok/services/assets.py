@@ -330,9 +330,9 @@ class UploadService(BaseService):
                     if response.status_code in (401, 403):
                         # 记录响应体，帮助诊断是 Cloudflare WAF 拦截还是 token 认证失败
                         try:
-                            resp_body = response.text[:500]
+                            resp_body = response.text[:500].replace("<", "\\<").replace(">", "\\>")
                         except Exception:
-                            resp_body = "<unreadable>"
+                            resp_body = "(unreadable)"
                         logger.warning(
                             f"Upload auth failed: {response.status_code} | body={resp_body}"
                         )

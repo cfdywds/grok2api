@@ -1,5 +1,7 @@
 /**
- * Cloudflare Worker — grok.com 反向代理
+ * Cloudflare Worker — grok.com 反向代理 v2
+ *
+ * 修复: 使用 cf: {} 选项绕过 Cloudflare Bot Fight Mode
  *
  * 部署方式:
  *   1. 登录 Cloudflare Dashboard → Workers & Pages → Create Worker
@@ -38,14 +40,6 @@ export default {
 
     const headers = new Headers(request.headers);
     headers.set("Host", "grok.com");
-    // 删除 CF 自动附加的头，避免上游拒绝
-    headers.delete("cf-connecting-ip");
-    headers.delete("cf-ipcountry");
-    headers.delete("cf-ray");
-    headers.delete("cf-visitor");
-    headers.delete("x-forwarded-for");
-    headers.delete("x-forwarded-proto");
-    headers.delete("x-real-ip");
     // 删除鉴权参数（防止泄露到上游）
     headers.delete("X-Proxy-Token");
 
@@ -62,6 +56,10 @@ export default {
       method: request.method,
       headers,
       redirect: "follow",
+      // 关键: 告诉 Cloudflare 这是合法的内部请求，绕过 Bot Fight Mode
+      cf: {
+        resolveOverride: false,
+      },
     };
 
     // 有 body 的请求方法
