@@ -2,18 +2,24 @@
 图片管理 API 路由
 """
 
+import hashlib
 import random
+import uuid
+from math import gcd
+from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.core.auth import verify_api_key
 from app.core.logger import logger
 from app.services.gallery import (
     ImageFilter,
     ImageListResponse,
     ImageStats,
 )
+from app.services.gallery.models import ImageMetadata
 from app.services.gallery.service import get_image_metadata_service
 
 
@@ -33,6 +39,84 @@ class UpdateTagsRequest(BaseModel):
 class ToggleFavoriteRequest(BaseModel):
     """切换收藏请求"""
     favorite: bool
+
+
+@router.post("/upload", dependencies=[Depends(verify_api_key)])
+async def upload_image(file: UploadFile = File(...)):
+    """上传图片到画廊并写入元数据。"""
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="上传文件不能为空")
+        if len(content) > 50 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="图片大小不能超过 50MB")
+
+        suffix = Path(file.filename or "upload.jpg").suffix.lower()
+        if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+            raise HTTPException(status_code=400, detail="仅支持 jpg/jpeg/png/webp 图片")
+
+        from PIL import Image
+        from io import BytesIO
+
+        image = Image.open(BytesIO(content))
+        width, height = image.size
+        aspect_ratio = f"{width // gcd(width, height)}:{height // gcd(width, height)}"
+        created_at = int(__import__("time").time() * 1000)
+        content_hash = hashlib.sha256(content).hexdigest()
+
+        service = get_image_metadata_service()
+        existing = await service.find_image_by_hash(content_hash)
+        if existing:
+            return {
+                "success": True,
+                "id": existing.id,
+                "filename": existing.filename,
+                "url": f"/v1/files/image/{existing.filename}",
+                "duplicate": True,
+            }
+
+        service.image_dir.mkdir(parents=True, exist_ok=True)
+        image_id = str(uuid.uuid4())
+        filename = f"{image_id}{suffix}"
+        file_path = service.image_dir / filename
+        file_path.write_bytes(content)
+
+        metadata = ImageMetadata(
+            id=image_id,
+            filename=filename,
+            prompt=f"上传: {Path(file.filename or filename).stem}",
+            model="upload",
+            aspect_ratio=aspect_ratio,
+            created_at=created_at,
+            file_size=len(content),
+            width=width,
+            height=height,
+            tags=["上传"],
+            nsfw=False,
+            metadata={
+                "source": "novel-director-upload",
+                "original_filename": file.filename or filename,
+                "content_hash": content_hash,
+            },
+        )
+
+        success = await service.add_image(metadata)
+        if not success:
+            if file_path.exists():
+                file_path.unlink()
+            raise HTTPException(status_code=500, detail="写入图片元数据失败")
+
+        return {
+            "success": True,
+            "id": image_id,
+            "filename": filename,
+            "url": f"/v1/files/image/{filename}",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"上传图片失败: {e}")
+        raise HTTPException(status_code=500, detail=f"上传图片失败: {str(e)}")
 
 
 @router.post("/scan")

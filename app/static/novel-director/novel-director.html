@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grok2API - 场景导演</title>
+  <link rel="icon" href="/static/favicon/favicon.ico">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-mono/style.css" rel="stylesheet">
+  <link href="/static/common/common.css?v=3" rel="stylesheet">
+  <link href="/static/novel-director/novel-director.css?v=1" rel="stylesheet">
+  <link href="/static/common/toast.css" rel="stylesheet">
+</head>
+
+<body class="min-h-screen flex flex-col" style="background-color: var(--bg);">
+  <div id="toast-container" class="toast-container"></div>
+  <div id="app-header"></div>
+
+  <main class="flex-1 container mx-auto max-w-6xl px-4 sm:px-6 py-5 sm:py-8 fade-in">
+    <!-- 顶部提示 -->
+    <div class="tips-banner">
+      <strong>角色一致性最佳实践：</strong>
+      参考图是王道，比纯文字描述效果好 10 倍 | 外貌描述要具体（英文），如 "long wavy brown hair, green eyes" | 同一故事使用相同风格预设
+    </div>
+
+    <div class="space-y-4 sm:space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-2xl font-semibold tracking-tight">场景导演</h2>
+          <p class="text-[var(--accents-4)] mt-1 text-sm">小说转视频的角色一致性管理，角色档案 + 参考图锚定 + Prompt 组装</p>
+        </div>
+      </div>
+
+      <div class="h-px bg-[var(--border)]"></div>
+
+      <!-- Tab 导航 -->
+      <div class="tabs-nav">
+        <button class="tab-btn active" data-tab="characters">角色管理</button>
+        <button class="tab-btn" data-tab="projects">项目列表</button>
+        <button class="tab-btn" data-tab="scenes" id="scenesTab" style="display:none;">场景编辑</button>
+      </div>
+
+      <!-- 角色管理 Tab -->
+      <div id="charactersTab" class="tab-content">
+        <div class="tab-header">
+          <h3 class="text-lg font-medium">角色档案</h3>
+          <button id="addCharacterBtn" class="geist-button primary">+ 新建角色</button>
+        </div>
+
+        <div id="charactersList" class="characters-grid">
+          <!-- 角色卡片将在这里动态生成 -->
+          <div class="empty-state">
+            <p>暂无角色，点击「新建角色」开始创建</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 项目列表 Tab -->
+      <div id="projectsTab" class="tab-content" style="display:none;">
+        <div class="tab-header">
+          <h3 class="text-lg font-medium">故事项目</h3>
+          <button id="addProjectBtn" class="geist-button primary">+ 新建项目</button>
+        </div>
+
+        <div id="projectsList" class="projects-grid">
+          <div class="empty-state">
+            <p>暂无项目，点击「新建项目」开始创作</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 场景编辑 Tab -->
+      <div id="scenesTabContent" class="tab-content" style="display:none;">
+        <div class="tab-header">
+          <div class="flex items-center gap-3">
+            <button id="backToProjectsBtn" class="geist-button secondary">&larr; 返回</button>
+            <h3 class="text-lg font-medium" id="projectTitle">项目名称</h3>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="addSceneBtn" class="geist-button primary">+ 添加场景</button>
+          </div>
+        </div>
+
+        <div class="scenes-layout">
+          <!-- 左侧：场景列表 -->
+          <div class="scenes-panel">
+            <div class="panel-title">场景列表</div>
+            <div id="scenesList" class="scenes-list">
+              <div class="empty-state">
+                <p>暂无场景</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右侧：场景编辑 -->
+          <div class="scene-editor">
+            <div id="noSceneSelected" class="empty-state">
+              <p>选择或创建一个场景开始编辑</p>
+            </div>
+
+            <div id="sceneEditorForm" style="display:none;">
+              <div class="editor-section">
+                <div class="section-title">场景信息</div>
+
+                <div class="form-group">
+                  <label class="field-label">叙事文本</label>
+                  <textarea id="sceneNarrative" class="geist-input" rows="3"
+                    placeholder="描述这个场景发生了什么..."></textarea>
+                </div>
+
+                <div class="form-group">
+                  <label class="field-label">环境描述</label>
+                  <input type="text" id="sceneSetting" class="geist-input"
+                    placeholder="例如：rainy night street with neon lights">
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group half">
+                    <label class="field-label">情绪氛围</label>
+                    <select id="sceneMood" class="geist-select">
+                      <option value="">选择氛围</option>
+                      <option value="紧张">紧张</option>
+                      <option value="温馨">温馨</option>
+                      <option value="悲伤">悲伤</option>
+                      <option value="欢快">欢快</option>
+                      <option value="神秘">神秘</option>
+                      <option value="浪漫">浪漫</option>
+                      <option value="恐怖">恐怖</option>
+                      <option value="史诗">史诗</option>
+                      <option value="平静">平静</option>
+                      <option value="激动">激动</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group half">
+                    <label class="field-label">镜头语言</label>
+                    <select id="sceneCamera" class="geist-select">
+                      <option value="">选择镜头</option>
+                      <option value="特写">特写</option>
+                      <option value="中景">中景</option>
+                      <option value="全景">全景</option>
+                      <option value="远景">远景</option>
+                      <option value="俯视">俯视</option>
+                      <option value="仰视">仰视</option>
+                      <option value="跟拍">跟拍</option>
+                      <option value="摇镜">摇镜</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="editor-section">
+                <div class="section-title">出场角色</div>
+                <div id="sceneCharacters" class="character-select">
+                  <!-- 角色复选框将在这里动态生成 -->
+                </div>
+              </div>
+
+              <div class="editor-section">
+                <div class="section-title">Prompt 预览</div>
+                <div id="promptPreview" class="prompt-preview">
+                  <p class="text-[var(--accents-4)]">填写场景信息后自动生成...</p>
+                </div>
+              </div>
+
+              <div class="editor-actions">
+                <button id="saveSceneBtn" class="geist-button primary">保存场景</button>
+                <button id="generateVideoBtn" class="geist-button secondary">生成视频</button>
+                <button id="previewVideoBtn" class="geist-button secondary" style="display:none;">查看视频</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+      <div id="app-footer"></div>
+
+  <!-- 角色弹窗 -->
+  <div id="characterModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="characterModalTitle">新建角色</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="field-label">角色名 *</label>
+          <input type="text" id="charName" class="geist-input" placeholder="角色名称">
+        </div>
+
+        <div class="form-group">
+          <label class="field-label">外貌描述（英文，用于 Prompt）</label>
+          <textarea id="charAppearance" class="geist-input" rows="3"
+            placeholder="例如：young woman with long wavy brown hair, green eyes, wearing red leather jacket"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="field-label">性格描述（中文，仅供参考）</label>
+          <textarea id="charPersonality" class="geist-input" rows="2"
+            placeholder="例如：性格沉稳，做事果断"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="field-label">特征标签</label>
+          <input type="text" id="charTraits" class="geist-input" placeholder="用逗号分隔，如：长发, 红衣, 冷酷">
+        </div>
+
+        <div class="form-group">
+          <label class="field-label">参考图</label>
+          <div class="ref-image-section">
+            <div id="charRefImageArea" class="image-upload-area">
+              <img id="charRefPreview" src="" alt="" style="display:none;">
+              <span class="upload-text">点击或拖拽上传</span>
+            </div>
+            <div class="ref-image-actions">
+              <button id="generateRefBtn" class="geist-button secondary text-sm">AI 生成参考图</button>
+              <button id="selectFromGalleryBtn" class="geist-button secondary text-sm">从画廊选择</button>
+            </div>
+          </div>
+          <input type="hidden" id="charRefImageUrl">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="cancelCharBtn" class="geist-button secondary">取消</button>
+        <button id="saveCharBtn" class="geist-button primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 项目弹窗 -->
+  <div id="projectModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="projectModalTitle">新建项目</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="field-label">项目名称 *</label>
+          <input type="text" id="projectNameInput" class="geist-input" placeholder="故事项目名称">
+        </div>
+
+        <div class="form-group">
+          <label class="field-label">故事简介</label>
+          <textarea id="projectDescInput" class="geist-input" rows="3" placeholder="简短描述故事内容..."></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group half">
+            <label class="field-label">默认风格</label>
+            <select id="projectStyleInput" class="geist-select">
+              <option value="normal">Normal 标准</option>
+              <option value="fun">Fun 趣味</option>
+              <option value="spicy">Spicy 辛辣</option>
+              <option value="cinematic">Cinematic 电影</option>
+              <option value="anime">Anime 动漫</option>
+            </select>
+          </div>
+
+          <div class="form-group half">
+            <label class="field-label">默认比例</label>
+            <select id="projectRatioInput" class="geist-select">
+              <option value="16:9">16:9 横屏</option>
+              <option value="9:16">9:16 竖屏</option>
+              <option value="3:2">3:2</option>
+              <option value="1:1">1:1 方形</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="field-label">默认分辨率</label>
+          <select id="projectResolutionInput" class="geist-select">
+            <option value="480p">480p</option>
+            <option value="720p">720p</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="cancelProjectBtn" class="geist-button secondary">取消</button>
+        <button id="saveProjectBtn" class="geist-button primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="galleryPickerModal" class="modal">
+    <div class="modal-content modal-content-wide">
+      <div class="modal-header">
+        <h3>从画廊选择参考图</h3>
+        <button class="modal-close" data-close-modal="gallery">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="galleryPickerList" class="gallery-picker-grid">
+          <div class="empty-state">
+            <p>正在加载画廊图片...</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="cancelGalleryPickerBtn" class="geist-button secondary">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/common/admin-auth.js?v=3"></script>
+  <script src="/static/common/header.js?v=5"></script>
+  <script src="/static/common/footer.js?v=1"></script>
+  <script src="/static/common/toast.js"></script>
+  <script src="/static/novel-director/novel-director.js?v=3"></script>
+</body>
+
+</html>

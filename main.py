@@ -33,8 +33,10 @@ from app.api.v1.video import router as video_router  # noqa: E402
 from app.api.v1.files import router as files_router  # noqa: E402
 from app.api.v1.models import router as models_router  # noqa: E402
 from app.api.v1.gallery import router as gallery_router  # noqa: E402
+from app.api.v1.video_gallery import router as video_gallery_router  # noqa: E402
 from app.api.v1.prompt import router as prompt_router  # noqa: E402
 from app.api.v1.prompts import router as prompts_router  # noqa: E402
+from app.api.v1.novel_director import router as novel_director_router  # noqa: E402
 from app.services.token import get_scheduler  # noqa: E402
 
 
@@ -98,12 +100,25 @@ async def _cleanup_tmp_files():
     while True:
         await asyncio.sleep(interval)
         cutoff = time.time() - ttl
+
+        # 获取被视频画廊追踪的文件名，跳过清理
+        tracked_videos: set[str] = set()
+        try:
+            from app.services.video_gallery.service import get_video_metadata_service
+            video_service = get_video_metadata_service()
+            tracked_videos = await video_service.get_tracked_filenames()
+        except Exception:
+            pass
+
         deleted = 0
         for d in dirs:
             if not d.exists():
                 continue
+            is_video_dir = d.name == "video"
             for f in d.glob("*"):
                 if f.is_file():
+                    if is_video_dir and f.name in tracked_videos:
+                        continue
                     try:
                         if f.stat().st_mtime < cutoff:
                             f.unlink()
@@ -153,7 +168,9 @@ def create_app() -> FastAPI:
     )
     app.include_router(files_router, prefix="/v1/files")
     app.include_router(gallery_router)
+    app.include_router(video_gallery_router)
     app.include_router(prompts_router)
+    app.include_router(novel_director_router)
 
     # 静态文件服务
     from fastapi.staticfiles import StaticFiles
@@ -177,7 +194,7 @@ if __name__ == "__main__":
     import uvicorn
 
     host = os.getenv("SERVER_HOST", "0.0.0.0")
-    port = int(os.getenv("SERVER_PORT", "8080"))
+    port = int(os.getenv("SERVER_PORT", "8001"))
     workers = int(os.getenv("SERVER_WORKERS", "1"))
 
     # 平台检查

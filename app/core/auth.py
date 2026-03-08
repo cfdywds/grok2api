@@ -90,3 +90,31 @@ async def verify_app_key(
         )
 
     return auth.credentials
+
+
+async def verify_admin_session_or_app_key(
+    auth: Optional[HTTPAuthorizationCredentials] = Security(security),
+) -> Optional[str]:
+    """兼容后台 API Key 与旧 app_key 的鉴权。"""
+    api_key = get_admin_api_key()
+    app_key = get_config("app.app_key", DEFAULT_APP_KEY) or ""
+
+    accepted_tokens = {token for token in (api_key, app_key) if token}
+    if not accepted_tokens:
+        return None
+
+    if not auth:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if auth.credentials not in accepted_tokens:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return auth.credentials

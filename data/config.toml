@@ -9,6 +9,8 @@ video_format = "html"
 timeout = 120
 base_proxy_url = "http://127.0.0.1:7890"
 asset_proxy_url = ""
+grok_base_url = ""
+grok_proxy_token = ""
 
 [security]
 cf_clearance = ""
@@ -70,8 +72,8 @@ nsfw_batch_size = 50
 nsfw_max_tokens = 1000
 
 [video]
-concurrent = 2
-stream_timeout = 300
 auto_upscale = true
 moderated_max_retry = 5
 avoid_cjk_text = true
+concurrent = 2
+stream_timeout = 300

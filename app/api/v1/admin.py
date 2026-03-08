@@ -166,6 +166,18 @@ async def gallery_page():
     return await render_template("gallery/gallery.html")
 
 
+@router.get("/admin/video-gallery")
+async def video_gallery_page():
+    """视频管理页面"""
+    return await render_template("video-gallery/video-gallery.html")
+
+
+@router.get("/admin/novel-director")
+async def novel_director_page():
+    """场景导演页面"""
+    return await render_template("novel-director/novel-director.html")
+
+
 @router.get("/admin/gallery/random")
 async def gallery_random_page():
     """随机图片查看页面"""

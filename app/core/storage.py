@@ -42,6 +42,8 @@ DATA_DIR = Path(os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR))).expanduser()
 CONFIG_FILE = DATA_DIR / "config.toml"
 TOKEN_FILE = DATA_DIR / "token.json"
 IMAGE_METADATA_FILE = DATA_DIR / "image_metadata.json"
+VIDEO_METADATA_FILE = DATA_DIR / "video_metadata.json"
+NOVEL_DATA_FILE = DATA_DIR / "novel_data.json"
 PROMPTS_FILE = DATA_DIR / "prompts.json"
 LOCK_DIR = DATA_DIR / ".locks"
 
@@ -142,6 +144,16 @@ class BaseStorage(abc.ABC):
         pass
 
     @abc.abstractmethod
+    async def load_video_metadata(self) -> Dict[str, Any]:
+        """加载视频元数据"""
+        pass
+
+    @abc.abstractmethod
+    async def save_video_metadata(self, data: Dict[str, Any]):
+        """保存视频元数据"""
+        pass
+
+    @abc.abstractmethod
     async def load_prompts(self) -> Dict[str, Any]:
         """加载提示词"""
         pass
@@ -149,6 +161,16 @@ class BaseStorage(abc.ABC):
     @abc.abstractmethod
     async def save_prompts(self, data: Dict[str, Any]):
         """保存提示词"""
+        pass
+
+    @abc.abstractmethod
+    async def load_novel_data(self) -> Dict[str, Any]:
+        """加载小说导演数据（角色+场景+项目）"""
+        pass
+
+    @abc.abstractmethod
+    async def save_novel_data(self, data: Dict[str, Any]):
+        """保存小说导演数据"""
         pass
 
     @abc.abstractmethod
@@ -313,6 +335,26 @@ class LocalStorage(BaseStorage):
             logger.error(f"LocalStorage: 保存图片元数据失败: {e}")
             raise StorageError(f"保存图片元数据失败: {e}")
 
+    async def load_video_metadata(self) -> Dict[str, Any]:
+        if not VIDEO_METADATA_FILE.exists():
+            return {"videos": [], "version": "1.0"}
+        try:
+            async with aiofiles.open(VIDEO_METADATA_FILE, "rb") as f:
+                content = await f.read()
+                return json_loads(content)
+        except Exception as e:
+            logger.error(f"LocalStorage: 加载视频元数据失败: {e}")
+            return {"videos": [], "version": "1.0"}
+
+    async def save_video_metadata(self, data: Dict[str, Any]):
+        try:
+            VIDEO_METADATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+            content = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+            await safe_atomic_write(VIDEO_METADATA_FILE, content)
+        except Exception as e:
+            logger.error(f"LocalStorage: 保存视频元数据失败: {e}")
+            raise StorageError(f"保存视频元数据失败: {e}")
+
     async def load_prompts(self) -> Dict[str, Any]:
         if not PROMPTS_FILE.exists():
             return {"prompts": [], "version": "1.0"}
@@ -332,6 +374,28 @@ class LocalStorage(BaseStorage):
         except Exception as e:
             logger.error(f"LocalStorage: 保存提示词失败: {e}")
             raise StorageError(f"保存提示词失败: {e}")
+
+    async def load_novel_data(self) -> Dict[str, Any]:
+        """加载小说导演数据（角色+场景+项目）"""
+        if not NOVEL_DATA_FILE.exists():
+            return {"characters": [], "projects": [], "scenes": [], "version": "1.0"}
+        try:
+            async with aiofiles.open(NOVEL_DATA_FILE, "rb") as f:
+                content = await f.read()
+                return json_loads(content)
+        except Exception as e:
+            logger.error(f"LocalStorage: 加载小说导演数据失败: {e}")
+            return {"characters": [], "projects": [], "scenes": [], "version": "1.0"}
+
+    async def save_novel_data(self, data: Dict[str, Any]):
+        """保存小说导演数据"""
+        try:
+            NOVEL_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+            content = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+            await safe_atomic_write(NOVEL_DATA_FILE, content)
+        except Exception as e:
+            logger.error(f"LocalStorage: 保存小说导演数据失败: {e}")
+            raise StorageError(f"保存小说导演数据失败: {e}")
 
     async def close(self):
         pass
@@ -361,7 +425,9 @@ class RedisStorage(BaseStorage):
         self.prefix_pool_set = "grok2api:pool:"  # Set: pool -> token_ids
         self.prefix_token_hash = "grok2api:token:"  # Hash: token_id -> token_data
         self.image_metadata_key = "grok2api:image_metadata"  # String: JSON data
+        self.video_metadata_key = "grok2api:video_metadata"  # String: JSON data
         self.prompts_key = "grok2api:prompts"  # String: JSON data
+        self.novel_data_key = "grok2api:novel_data"  # String: JSON data
         self.lock_prefix = "grok2api:lock:"
 
     @asynccontextmanager
@@ -608,6 +674,25 @@ class RedisStorage(BaseStorage):
             logger.error(f"RedisStorage: 保存图片元数据失败: {e}")
             raise
 
+    async def load_video_metadata(self) -> Dict[str, Any]:
+        """从 Redis 加载视频元数据"""
+        try:
+            data = await self.redis.get(self.video_metadata_key)
+            if not data:
+                return {"videos": [], "version": "1.0"}
+            return json_loads(data)
+        except Exception as e:
+            logger.error(f"RedisStorage: 加载视频元数据失败: {e}")
+            return {"videos": [], "version": "1.0"}
+
+    async def save_video_metadata(self, data: Dict[str, Any]):
+        """保存视频元数据到 Redis"""
+        try:
+            await self.redis.set(self.video_metadata_key, json_dumps(data))
+        except Exception as e:
+            logger.error(f"RedisStorage: 保存视频元数据失败: {e}")
+            raise
+
     async def load_prompts(self) -> Dict[str, Any]:
         """从 Redis 加载提示词"""
         try:
@@ -625,6 +710,25 @@ class RedisStorage(BaseStorage):
             await self.redis.set(self.prompts_key, json_dumps(data))
         except Exception as e:
             logger.error(f"RedisStorage: 保存提示词失败: {e}")
+            raise
+
+    async def load_novel_data(self) -> Dict[str, Any]:
+        """从 Redis 加载小说导演数据"""
+        try:
+            data = await self.redis.get(self.novel_data_key)
+            if not data:
+                return {"characters": [], "projects": [], "scenes": [], "version": "1.0"}
+            return json_loads(data)
+        except Exception as e:
+            logger.error(f"RedisStorage: 加载小说导演数据失败: {e}")
+            return {"characters": [], "projects": [], "scenes": [], "version": "1.0"}
+
+    async def save_novel_data(self, data: Dict[str, Any]):
+        """保存小说导演数据到 Redis"""
+        try:
+            await self.redis.set(self.novel_data_key, json_dumps(data))
+        except Exception as e:
+            logger.error(f"RedisStorage: 保存小说导演数据失败: {e}")
             raise
 
     async def close(self):
@@ -776,6 +880,18 @@ class SQLStorage(BaseStorage):
                 """)
                 )
 
+                # 视频元数据表
+                await conn.execute(
+                    text("""
+                    CREATE TABLE IF NOT EXISTS video_metadata (
+                        id VARCHAR(64) PRIMARY KEY,
+                        data TEXT,
+                        created_at BIGINT,
+                        updated_at BIGINT
+                    )
+                """)
+                )
+
                 # 提示词表（规范化：每条提示词一行）
                 await conn.execute(
                     text("""
@@ -793,11 +909,25 @@ class SQLStorage(BaseStorage):
                 """)
                 )
 
+                # 小说导演数据表
+                await conn.execute(
+                    text("""
+                    CREATE TABLE IF NOT EXISTS novel_data (
+                        id VARCHAR(64) PRIMARY KEY,
+                        data TEXT,
+                        created_at BIGINT,
+                        updated_at BIGINT
+                    )
+                """)
+                )
+
             # 第二步：创建索引（每个索引独立事务，失败不影响其他步骤）
             for idx_sql in [
                 "CREATE INDEX idx_tokens_pool ON tokens (pool_name)",
                 "CREATE INDEX idx_image_metadata_created ON image_metadata (created_at)",
+                "CREATE INDEX idx_video_metadata_created ON video_metadata (created_at)",
                 "CREATE INDEX idx_prompts_created ON prompts (created_at)",
+                "CREATE INDEX idx_novel_data_created ON novel_data (created_at)",
             ]:
                 try:
                     async with self.engine.begin() as conn:
@@ -1184,6 +1314,50 @@ class SQLStorage(BaseStorage):
             logger.error(f"SQLStorage: 保存图片元数据失败: {e}")
             raise
 
+    async def load_video_metadata(self) -> Dict[str, Any]:
+        await self._ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            async with self.async_session() as session:
+                res = await session.execute(
+                    text("SELECT data FROM video_metadata WHERE id = 'metadata'")
+                )
+                row = res.fetchone()
+                if not row:
+                    return {"videos": [], "version": "1.0"}
+
+                try:
+                    return json_loads(row[0])
+                except Exception:
+                    return {"videos": [], "version": "1.0"}
+        except Exception as e:
+            logger.error(f"SQLStorage: 加载视频元数据失败: {e}")
+            return {"videos": [], "version": "1.0"}
+
+    async def save_video_metadata(self, data: Dict[str, Any]):
+        await self._ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            async with self.async_session() as session:
+                data_json = json_dumps(data)
+                now = int(time.time() * 1000)
+
+                await session.execute(
+                    text("DELETE FROM video_metadata WHERE id = 'metadata'")
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO video_metadata (id, data, created_at, updated_at) VALUES (:id, :data, :created_at, :updated_at)"
+                    ),
+                    {"id": "metadata", "data": data_json, "created_at": now, "updated_at": now},
+                )
+                await session.commit()
+        except Exception as e:
+            logger.error(f"SQLStorage: 保存视频元数据失败: {e}")
+            raise
+
     async def load_prompts(self) -> Dict[str, Any]:
         await self._ensure_schema()
         import json as _json
@@ -1252,6 +1426,52 @@ class SQLStorage(BaseStorage):
                 await session.commit()
         except Exception as e:
             logger.error(f"SQLStorage: 保存提示词失败: {e}")
+            raise
+
+    async def load_novel_data(self) -> Dict[str, Any]:
+        """从 SQL 加载小说导演数据"""
+        await self._ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            async with self.async_session() as session:
+                res = await session.execute(
+                    text("SELECT data FROM novel_data WHERE id = 'metadata'")
+                )
+                row = res.fetchone()
+                if not row:
+                    return {"characters": [], "projects": [], "scenes": [], "version": "1.0"}
+
+                try:
+                    return json_loads(row[0])
+                except Exception:
+                    return {"characters": [], "projects": [], "scenes": [], "version": "1.0"}
+        except Exception as e:
+            logger.error(f"SQLStorage: 加载小说导演数据失败: {e}")
+            return {"characters": [], "projects": [], "scenes": [], "version": "1.0"}
+
+    async def save_novel_data(self, data: Dict[str, Any]):
+        """保存小说导演数据到 SQL"""
+        await self._ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            async with self.async_session() as session:
+                data_json = json_dumps(data)
+                now = int(time.time() * 1000)
+
+                await session.execute(
+                    text("DELETE FROM novel_data WHERE id = 'metadata'")
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO novel_data (id, data, created_at, updated_at) VALUES (:id, :data, :created_at, :updated_at)"
+                    ),
+                    {"id": "metadata", "data": data_json, "created_at": now, "updated_at": now},
+                )
+                await session.commit()
+        except Exception as e:
+            logger.error(f"SQLStorage: 保存小说导演数据失败: {e}")
             raise
 
     async def close(self):

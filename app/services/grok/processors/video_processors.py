@@ -10,6 +10,7 @@
 
 import asyncio
 import re
+import time
 import uuid
 from typing import Any, AsyncGenerator, AsyncIterable, Optional
 
@@ -48,15 +49,19 @@ class VideoStreamProcessor(BaseProcessor):
         self,
         model: str,
         token: str = "",
+        prompt: str = "",
         think: bool = None,
         upscale_on_finish: bool = False,
     ):
         super().__init__(model, token)
+        self.prompt = prompt
         self.response_id: Optional[str] = None
         self.think_opened: bool = False
         self.role_sent: bool = False
         self.video_format = str(get_config("app.video_format")).lower()
         self.upscale_on_finish = bool(upscale_on_finish)
+
+
 
         if think is None:
             self.show_think = get_config("chat.thinking")
@@ -117,6 +122,55 @@ class VideoStreamProcessor(BaseProcessor):
                 token_map.save_mapping(asset_id, self.token)
             except Exception as e:
                 logger.debug(f"Failed to save asset-token mapping: {e}")
+
+    @staticmethod
+    def _extract_cached_filename(url: str) -> str:
+        """从代理 URL 中提取与 DownloadService._cache_path 一致的文件名。
+
+        代理 URL 格式：http://host/v1/files/{type}/users/.../file.mp4
+        DownloadService 保存时：path.lstrip("/").replace("/", "-")
+        """
+        if not url:
+            return ""
+        marker = "/v1/files/"
+        if marker in url:
+            # 取 /v1/files/{type}/ 之后的路径
+            after = url.split(marker, 1)[1].split("?")[0]
+            # 跳过 media_type 前缀（image/video）
+            parts = after.split("/", 1)
+            path_part = parts[1] if len(parts) > 1 else parts[0]
+            return path_part.replace("/", "-")
+        # 降级：直接取最后一段
+        return url.rsplit("/", 1)[-1].split("?")[0]
+
+    async def _auto_save_metadata(
+        self, video_url: str, thumbnail_url: str, video_post_id: str, prompt: str = ""
+    ) -> None:
+        """自动保存视频元数据到 video gallery"""
+        try:
+            from app.services.video_gallery.service import get_video_metadata_service
+            from app.services.video_gallery.models import VideoMetadata
+
+            filename = self._extract_cached_filename(video_url)
+            if not filename:
+                return
+
+            thumb_name = self._extract_cached_filename(thumbnail_url)
+
+            service = get_video_metadata_service()
+            meta = VideoMetadata(
+                id=str(uuid.uuid4()),
+                filename=filename,
+                prompt=prompt or self.prompt,
+                model=self.model,
+                created_at=int(time.time() * 1000),
+                thumbnail_filename=thumb_name or None,
+                video_post_id=video_post_id or None,
+            )
+            await service.add_video(meta)
+            logger.debug(f"Auto-saved video metadata: {filename}")
+        except Exception as e:
+            logger.debug(f"Auto-save video metadata failed: {e}")
 
     async def process(
         self, response: AsyncIterable[bytes]
@@ -213,6 +267,11 @@ class VideoStreamProcessor(BaseProcessor):
                             logger.info(
                                 f"Video generated: {video_url} (post_id={video_post_id})"
                             )
+
+                            # 自动保存视频元数据到 video gallery
+                            await self._auto_save_metadata(
+                                final_video_url, final_thumbnail_url, video_post_id, self.prompt
+                            )
                     continue
 
             if self.think_opened:
@@ -267,9 +326,11 @@ class VideoCollectProcessor(BaseProcessor):
         self,
         model: str,
         token: str = "",
+        prompt: str = "",
         upscale_on_finish: bool = False,
     ):
         super().__init__(model, token)
+        self.prompt = prompt
         self.video_format = str(get_config("app.video_format")).lower()
         self.upscale_on_finish = bool(upscale_on_finish)
 
@@ -291,6 +352,35 @@ class VideoCollectProcessor(BaseProcessor):
         except Exception as e:
             logger.warning(f"Video upscale failed: {e}")
             return video_url
+
+    async def _auto_save_collect_metadata(
+        self, video_url: str, thumbnail_url: str, video_post_id: str, prompt: str = ""
+    ) -> None:
+        """自动保存视频元数据到 video gallery"""
+        try:
+            from app.services.video_gallery.service import get_video_metadata_service
+            from app.services.video_gallery.models import VideoMetadata
+
+            filename = VideoStreamProcessor._extract_cached_filename(video_url)
+            if not filename:
+                return
+
+            thumb_name = VideoStreamProcessor._extract_cached_filename(thumbnail_url)
+
+            service = get_video_metadata_service()
+            meta = VideoMetadata(
+                id=str(uuid.uuid4()),
+                filename=filename,
+                prompt=prompt or self.prompt,
+                model=self.model,
+                created_at=int(time.time() * 1000),
+                thumbnail_filename=thumb_name or None,
+                video_post_id=video_post_id or None,
+            )
+            await service.add_video(meta)
+            logger.debug(f"Auto-saved video metadata: {filename}")
+        except Exception as e:
+            logger.debug(f"Auto-save video metadata failed: {e}")
 
     async def process(self, response: AsyncIterable[bytes]) -> dict[str, Any]:
         """处理并收集视频响应"""
@@ -346,6 +436,11 @@ class VideoCollectProcessor(BaseProcessor):
                                 )
                             logger.info(
                                 f"Video generated: {video_url} (post_id={video_post_id})"
+                            )
+
+                            # 自动保存视频元数据到 video gallery
+                            await self._auto_save_collect_metadata(
+                                final_video_url, final_thumbnail_url, video_post_id, self.prompt
                             )
 
         except asyncio.CancelledError:

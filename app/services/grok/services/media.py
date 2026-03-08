@@ -869,7 +869,9 @@ class VideoService:
                 # 处理响应
                 if is_stream:
                     processor = VideoStreamProcessor(
-                        model, token, think,
+                        model, token,
+                        prompt=prompt,
+                        think=think,
                         upscale_on_finish=should_upscale,
                     )
                     return wrap_stream_with_usage(
@@ -879,6 +881,7 @@ class VideoService:
                 result = await VideoCollectProcessor(
                     model, token,
                     upscale_on_finish=should_upscale,
+                    prompt=prompt,
                 ).process(response)
                 try:
                     model_info = ModelService.get(model)
