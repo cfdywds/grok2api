@@ -1,4 +1,8 @@
 /* 场景导演样式 */
+:root {
+  --foreground: var(--fg, #111);
+  --bg-secondary: #fff;
+}
 
 .tips-banner {
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(147, 51, 234, 0.1));
@@ -52,6 +56,23 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+}
+
+#globalAddCharacterBtn {
+  flex-shrink: 0;
+}
+
+.floating-add-character-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 120;
+  background: #000 !important;
+  color: #fff !important;
+  border-color: #000 !important;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
 
 /* 角色网格 */
@@ -645,4 +666,22 @@ textarea.geist-input {
   color: var(--accents-5);
   line-height: 1.4;
   word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .tab-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .tab-header .geist-button,
+  #globalAddCharacterBtn {
+    width: 100%;
+  }
+
+  .floating-add-character-btn {
+    right: 12px;
+    bottom: 12px;
+    width: auto !important;
+  }
 }

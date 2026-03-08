@@ -6,6 +6,29 @@ const API_BASE = '/api/v1/admin/novel-director';
 const GALLERY_API_BASE = '/api/v1/admin/gallery';
 
 const elements = {};
+const toast = window.toast || window.Toast || {
+  success(message) {
+    if (typeof window.showToast === 'function') window.showToast(String(message), 'success');
+  },
+  error(message) {
+    if (typeof window.showToast === 'function') window.showToast(String(message), 'error');
+  },
+  info(message) {
+    if (typeof window.showToast === 'function') window.showToast(String(message), 'info');
+  },
+  warning(message) {
+    if (typeof window.showToast === 'function') window.showToast(String(message), 'warning');
+  },
+};
+
+function escapeHtml(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 // 状态管理
 const state = {
@@ -74,11 +97,28 @@ function getProjectVideoConfig() {
 }
 
 async function refreshCurrentProject() {
-  if (!state.currentProject?.id) return;
+  if (!state.currentProject?.id) {
+    if (elements.scenesTab) {
+      elements.scenesTab.style.display = 'none';
+    }
+    return;
+  }
   const project = state.projects.find((item) => item.id === state.currentProject.id);
   if (project) {
     state.currentProject = project;
     document.getElementById('projectTitle').textContent = project.title;
+    if (elements.scenesTab) {
+      elements.scenesTab.style.display = 'block';
+    }
+    return;
+  }
+  state.currentProject = null;
+  state.currentScene = null;
+  const activeTab = document.querySelector('.tab-btn.active')?.dataset?.tab;
+  if (activeTab === 'scenes') {
+    switchTab('projects');
+  } else if (elements.scenesTab) {
+    elements.scenesTab.style.display = 'none';
   }
 }
 
@@ -116,13 +156,21 @@ function initTabs() {
 }
 
 function switchTab(tabName) {
+  if (tabName === 'scenes' && !state.currentProject?.id) {
+    toast.info('请先在项目列表中打开一个项目');
+    tabName = 'projects';
+  }
+
   elements.tabs.forEach((t) => t.classList.remove('active'));
-  document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+  const targetTab = document.querySelector(`[data-tab="${tabName}"]`);
+  if (targetTab) {
+    targetTab.classList.add('active');
+  }
 
   elements.charactersTab.style.display = tabName === 'characters' ? 'block' : 'none';
   elements.projectsTab.style.display = tabName === 'projects' ? 'block' : 'none';
   elements.scenesTabContent.style.display = tabName === 'scenes' ? 'block' : 'none';
-  elements.scenesTab.style.display = ['scenes', 'projects'].includes(tabName) ? 'block' : 'none';
+  elements.scenesTab.style.display = state.currentProject?.id ? 'block' : 'none';
 }
 
 function initModals() {
@@ -198,6 +246,26 @@ function clearProjectForm() {
 }
 
 function initEventListeners() {
+  // 顶部快捷新建角色
+  const globalAddCharacterBtn = document.getElementById('globalAddCharacterBtn');
+  if (globalAddCharacterBtn) {
+    globalAddCharacterBtn.addEventListener('click', () => {
+      clearCharacterForm();
+      switchTab('characters');
+      openModal('character');
+    });
+  }
+
+  // 悬浮快捷新建角色
+  const floatingAddCharacterBtn = document.getElementById('floatingAddCharacterBtn');
+  if (floatingAddCharacterBtn) {
+    floatingAddCharacterBtn.addEventListener('click', () => {
+      clearCharacterForm();
+      switchTab('characters');
+      openModal('character');
+    });
+  }
+
   // 新建角色按钮
   document.getElementById('addCharacterBtn').addEventListener('click', () => {
     clearCharacterForm();
@@ -476,6 +544,13 @@ window.deleteProject = async function (id) {
 
     if (!res.ok) throw new Error('Failed to delete project');
 
+    if (state.currentProject?.id === id) {
+      state.currentProject = null;
+      state.currentScene = null;
+      elements.noSceneSelected.style.display = 'block';
+      elements.sceneEditorForm.style.display = 'none';
+    }
+
     toast.success('项目已删除');
     await loadProjects();
   } catch (e) {
@@ -706,6 +781,12 @@ window.deleteScene = async function (id, event) {
 };
 
 async function createScene() {
+  if (!state.currentProject?.id) {
+    toast.error('请先从项目列表进入一个项目');
+    switchTab('projects');
+    return;
+  }
+
   try {
     const res = await apiFetch(`${API_BASE}/scenes`, {
       method: 'POST',
@@ -722,12 +803,17 @@ async function createScene() {
       }),
     });
 
-    if (!res.ok) throw new Error('Failed to create scene');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create scene');
+    }
 
     const scene = await res.json();
     toast.success('场景已创建');
     await loadScenes(state.currentProject.id);
-    selectScene(scene.id);
+    if (typeof window.selectScene === 'function') {
+      window.selectScene(scene.id);
+    }
   } catch (e) {
     toast.error('创建失败: ' + e.message);
   }

@@ -33,7 +33,7 @@ from app.services.grok.services.media import VideoService
 from app.services.grok.models.model import ModelService
 from app.services.token.manager import get_token_manager
 
-router = APIRouter(prefix="/novel-director", tags=["Novel Director"])
+router = APIRouter(prefix="/api/v1/admin/novel-director", tags=["Novel Director"])
 
 
 def get_service() -> NovelDirectorService:

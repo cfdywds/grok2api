@@ -134,7 +134,8 @@ async function requestApiKey(appKey) {
   }
   const data = await res.json();
   const rawApiKey = data.api_key || '';
-  cachedApiKey = rawApiKey ? `Bearer ${rawApiKey}` : '';
+  const authToken = rawApiKey || appKey || '';
+  cachedApiKey = authToken ? `Bearer ${authToken}` : '';
   return cachedApiKey;
 }
 
