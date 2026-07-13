@@ -18,7 +18,7 @@ from app.services.grok.protocols.grpc_web import (
     parse_grpc_web_response,
     get_grpc_status,
 )
-from app.services.grok.utils.headers import build_sso_cookie
+from app.services.grok.utils.headers import build_sso_cookie, sanitize_headers
 from app.services.grok.utils.urls import grok_url, apply_proxy_token
 
 NSFW_API = "/auth_mgmt.AuthManagement/UpdateUserFeatureControls"
@@ -75,7 +75,7 @@ class NSFWService:
             "cookie": cookie,
         }
         apply_proxy_token(headers)
-        return headers
+        return sanitize_headers(headers)
 
     def _build_birth_headers(self, token: str) -> dict:
         """构造设置出生日期请求头"""
@@ -90,7 +90,7 @@ class NSFWService:
             "cookie": cookie,
         }
         apply_proxy_token(headers)
-        return headers
+        return sanitize_headers(headers)
 
     @staticmethod
     def _build_payload() -> bytes:

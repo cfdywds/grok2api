@@ -37,6 +37,7 @@ from app.api.v1.video_gallery import router as video_gallery_router  # noqa: E40
 from app.api.v1.prompt import router as prompt_router  # noqa: E402
 from app.api.v1.prompts import router as prompts_router  # noqa: E402
 from app.api.v1.novel_director import router as novel_director_router  # noqa: E402
+from app.api.v1.copilot import router as copilot_router  # noqa: E402
 from app.services.token import get_scheduler  # noqa: E402
 
 
@@ -54,6 +55,9 @@ async def lifespan(app: FastAPI):
     from app.services.grok.defaults import get_grok_defaults
 
     register_defaults(get_grok_defaults())
+
+    from app.services.copilot.defaults import get_copilot_defaults
+    register_defaults(get_copilot_defaults())
 
     # 2. 加载配置
     await config.load()
@@ -109,15 +113,32 @@ async def _cleanup_tmp_files():
             tracked_videos = await video_service.get_tracked_filenames()
         except Exception:
             pass
+        # 获取被图片画廊追踪的文件名，跳过清理
+        tracked_images: set[str] = set()
+        try:
+            from app.core.storage import get_storage
+
+            storage = get_storage()
+            image_data = await storage.load_image_metadata()
+            tracked_images = {
+                img.get("filename", "")
+                for img in image_data.get("images", [])
+                if img.get("filename")
+            }
+        except Exception:
+            pass
 
         deleted = 0
         for d in dirs:
             if not d.exists():
                 continue
             is_video_dir = d.name == "video"
+            is_image_dir = d.name == "image"
             for f in d.glob("*"):
                 if f.is_file():
                     if is_video_dir and f.name in tracked_videos:
+                        continue
+                    if is_image_dir and f.name in tracked_images:
                         continue
                     try:
                         if f.stat().st_mtime < cutoff:
@@ -171,6 +192,9 @@ def create_app() -> FastAPI:
     app.include_router(video_gallery_router)
     app.include_router(prompts_router)
     app.include_router(novel_director_router)
+    app.include_router(
+        copilot_router, prefix="/v1", dependencies=[Depends(verify_api_key)]
+    )
 
     # 静态文件服务
     from fastapi.staticfiles import StaticFiles

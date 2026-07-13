@@ -44,6 +44,7 @@ TOKEN_FILE = DATA_DIR / "token.json"
 IMAGE_METADATA_FILE = DATA_DIR / "image_metadata.json"
 VIDEO_METADATA_FILE = DATA_DIR / "video_metadata.json"
 NOVEL_DATA_FILE = DATA_DIR / "novel_data.json"
+COPILOT_DATA_FILE = DATA_DIR / "copilot_data.json"
 PROMPTS_FILE = DATA_DIR / "prompts.json"
 LOCK_DIR = DATA_DIR / ".locks"
 
@@ -171,6 +172,16 @@ class BaseStorage(abc.ABC):
     @abc.abstractmethod
     async def save_novel_data(self, data: Dict[str, Any]):
         """保存小说导演数据"""
+        pass
+
+    @abc.abstractmethod
+    async def load_copilot_data(self) -> Dict[str, Any]:
+        """加载 Copilot 会话数据"""
+        pass
+
+    @abc.abstractmethod
+    async def save_copilot_data(self, data: Dict[str, Any]):
+        """保存 Copilot 会话数据"""
         pass
 
     @abc.abstractmethod
@@ -397,6 +408,28 @@ class LocalStorage(BaseStorage):
             logger.error(f"LocalStorage: 保存小说导演数据失败: {e}")
             raise StorageError(f"保存小说导演数据失败: {e}")
 
+    async def load_copilot_data(self) -> Dict[str, Any]:
+        """加载 Copilot 会话数据"""
+        if not COPILOT_DATA_FILE.exists():
+            return {"sessions": [], "version": "1.0"}
+        try:
+            async with aiofiles.open(COPILOT_DATA_FILE, "rb") as f:
+                content = await f.read()
+                return json_loads(content)
+        except Exception as e:
+            logger.error(f"LocalStorage: 加载 Copilot 数据失败: {e}")
+            return {"sessions": [], "version": "1.0"}
+
+    async def save_copilot_data(self, data: Dict[str, Any]):
+        """保存 Copilot 会话数据"""
+        try:
+            COPILOT_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+            content = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+            await safe_atomic_write(COPILOT_DATA_FILE, content)
+        except Exception as e:
+            logger.error(f"LocalStorage: 保存 Copilot 数据失败: {e}")
+            raise StorageError(f"保存 Copilot 数据失败: {e}")
+
     async def close(self):
         pass
 
@@ -428,6 +461,7 @@ class RedisStorage(BaseStorage):
         self.video_metadata_key = "grok2api:video_metadata"  # String: JSON data
         self.prompts_key = "grok2api:prompts"  # String: JSON data
         self.novel_data_key = "grok2api:novel_data"  # String: JSON data
+        self.copilot_data_key = "grok2api:copilot_data"  # String: JSON data
         self.lock_prefix = "grok2api:lock:"
 
     @asynccontextmanager
@@ -731,6 +765,25 @@ class RedisStorage(BaseStorage):
             logger.error(f"RedisStorage: 保存小说导演数据失败: {e}")
             raise
 
+    async def load_copilot_data(self) -> Dict[str, Any]:
+        """从 Redis 加载 Copilot 数据"""
+        try:
+            data = await self.redis.get(self.copilot_data_key)
+            if not data:
+                return {"sessions": [], "version": "1.0"}
+            return json_loads(data)
+        except Exception as e:
+            logger.error(f"RedisStorage: 加载 Copilot 数据失败: {e}")
+            return {"sessions": [], "version": "1.0"}
+
+    async def save_copilot_data(self, data: Dict[str, Any]):
+        """保存 Copilot 数据到 Redis"""
+        try:
+            await self.redis.set(self.copilot_data_key, json_dumps(data))
+        except Exception as e:
+            logger.error(f"RedisStorage: 保存 Copilot 数据失败: {e}")
+            raise
+
     async def close(self):
         try:
             await self.redis.close()
@@ -921,6 +974,18 @@ class SQLStorage(BaseStorage):
                 """)
                 )
 
+                # Copilot 会话数据表
+                await conn.execute(
+                    text("""
+                    CREATE TABLE IF NOT EXISTS copilot_data (
+                        id VARCHAR(64) PRIMARY KEY,
+                        data TEXT,
+                        created_at BIGINT,
+                        updated_at BIGINT
+                    )
+                """)
+                )
+
             # 第二步：创建索引（每个索引独立事务，失败不影响其他步骤）
             for idx_sql in [
                 "CREATE INDEX idx_tokens_pool ON tokens (pool_name)",
@@ -928,6 +993,7 @@ class SQLStorage(BaseStorage):
                 "CREATE INDEX idx_video_metadata_created ON video_metadata (created_at)",
                 "CREATE INDEX idx_prompts_created ON prompts (created_at)",
                 "CREATE INDEX idx_novel_data_created ON novel_data (created_at)",
+                "CREATE INDEX idx_copilot_data_created ON copilot_data (created_at)",
             ]:
                 try:
                     async with self.engine.begin() as conn:
@@ -1472,6 +1538,52 @@ class SQLStorage(BaseStorage):
                 await session.commit()
         except Exception as e:
             logger.error(f"SQLStorage: 保存小说导演数据失败: {e}")
+            raise
+
+    async def load_copilot_data(self) -> Dict[str, Any]:
+        """从 SQL 加载 Copilot 数据"""
+        await self._ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            async with self.async_session() as session:
+                res = await session.execute(
+                    text("SELECT data FROM copilot_data WHERE id = 'metadata'")
+                )
+                row = res.fetchone()
+                if not row:
+                    return {"sessions": [], "version": "1.0"}
+
+                try:
+                    return json_loads(row[0])
+                except Exception:
+                    return {"sessions": [], "version": "1.0"}
+        except Exception as e:
+            logger.error(f"SQLStorage: 加载 Copilot 数据失败: {e}")
+            return {"sessions": [], "version": "1.0"}
+
+    async def save_copilot_data(self, data: Dict[str, Any]):
+        """保存 Copilot 数据到 SQL"""
+        await self._ensure_schema()
+        from sqlalchemy import text
+
+        try:
+            async with self.async_session() as session:
+                data_json = json_dumps(data)
+                now = int(time.time() * 1000)
+
+                await session.execute(
+                    text("DELETE FROM copilot_data WHERE id = 'metadata'")
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO copilot_data (id, data, created_at, updated_at) VALUES (:id, :data, :created_at, :updated_at)"
+                    ),
+                    {"id": "metadata", "data": data_json, "created_at": now, "updated_at": now},
+                )
+                await session.commit()
+        except Exception as e:
+            logger.error(f"SQLStorage: 保存 Copilot 数据失败: {e}")
             raise
 
     async def close(self):

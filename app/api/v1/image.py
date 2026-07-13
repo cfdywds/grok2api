@@ -4,7 +4,6 @@ Image Generation API 路由
 
 import asyncio
 import base64
-import math
 import random
 import re
 import time
@@ -23,8 +22,6 @@ from app.services.grok.models.model import ModelService
 from app.services.grok.processors import (
     ImageStreamProcessor,
     ImageCollectProcessor,
-    ImageWSStreamProcessor,
-    ImageWSCollectProcessor,
 )
 from app.services.token import get_token_manager, EffortType
 from app.core.exceptions import ValidationException, AppException, ErrorType
@@ -326,53 +323,24 @@ async def create_image(request: ImageGenerationRequest):
     # 获取 token 和模型信息
     token_mgr, token = await _get_token(request.model)
     model_info = ModelService.get(request.model)
-    use_ws = bool(get_config("image.image_ws"))
+    aspect_ratio = resolve_aspect_ratio(request.size)
+    enable_nsfw = bool(get_config("image.image_ws_nsfw"))
 
     # 流式模式
     if request.stream:
-        if use_ws:
-            aspect_ratio = resolve_aspect_ratio(request.size)
-            enable_nsfw = bool(get_config("image.image_ws_nsfw"))
-            upstream = image_service.stream(
-                token=token,
-                prompt=request.prompt,
-                aspect_ratio=aspect_ratio,
-                n=request.n,
-                enable_nsfw=enable_nsfw,
-            )
-            processor = ImageWSStreamProcessor(
-                model_info.model_id,
-                token,
-                n=request.n,
-                response_format=response_format,
-                size=request.size,
-            )
-
-            return StreamingResponse(
-                _wrap_stream_with_usage(
-                    processor.process(upstream), token_mgr, token, model_info
-                ),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-            )
-
-        chat_service = GrokChatService()
-        response = await chat_service.chat(
+        stream = await image_service.stream_generate(
             token=token,
-            message=f"Image Generation: {request.prompt}",
-            model=model_info.grok_model,
-            mode=model_info.model_mode,
-            stream=True,
-        )
-
-        processor = ImageStreamProcessor(
-            model_info.model_id, token, n=request.n, response_format=response_format
+            prompt=request.prompt,
+            model_info=model_info,
+            aspect_ratio=aspect_ratio,
+            n=request.n,
+            response_format=response_format,
+            enable_nsfw=enable_nsfw,
+            size=request.size,
         )
 
         return StreamingResponse(
-            _wrap_stream_with_usage(
-                processor.process(response), token_mgr, token, model_info
-            ),
+            _wrap_stream_with_usage(stream, token_mgr, token, model_info),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
         )
@@ -380,94 +348,61 @@ async def create_image(request: ImageGenerationRequest):
     # 非流式模式
     n = request.n
 
-    usage_override = None
-    if use_ws:
-        aspect_ratio = resolve_aspect_ratio(request.size)
-        enable_nsfw = bool(get_config("image.image_ws_nsfw"))
-        all_images = []
-        seen = set()
-        expected_per_call = 6
-        calls_needed = max(1, math.ceil(n / expected_per_call))
-        calls_needed = min(calls_needed, n)
+    usage_override = {
+        "total_tokens": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
+    }
+    all_images = []
+    seen = set()
 
-        async def _fetch_batch(call_target: int):
-            upstream = image_service.stream(
+    async def _fetch_batch(call_target: int):
+        try:
+            batch = await image_service.generate(
                 token=token,
                 prompt=request.prompt,
+                model_info=model_info,
                 aspect_ratio=aspect_ratio,
                 n=call_target,
+                response_format=response_format,
                 enable_nsfw=enable_nsfw,
             )
-            processor = ImageWSCollectProcessor(
-                model_info.model_id,
-                token,
-                n=call_target,
-                response_format=response_format,
-            )
-            return await processor.process(upstream)
+        except Exception as e:
+            logger.warning(f"Image batch failed: {e}")
+            return []
 
-        tasks = []
-        for i in range(calls_needed):
-            remaining = n - (i * expected_per_call)
-            call_target = min(expected_per_call, remaining)
-            tasks.append(_fetch_batch(call_target))
+        valid_images = [img for img in batch if img and img != "error"]
+        if valid_images:
+            try:
+                await token_mgr.consume(token, _get_effort(model_info))
+            except Exception as e:
+                logger.warning(f"Failed to consume token: {e}")
+        return batch
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for batch in results:
-            if isinstance(batch, Exception):
-                logger.warning(f"WS batch failed: {batch}")
-                continue
-            for img in batch:
-                if img not in seen:
-                    seen.add(img)
-                    all_images.append(img)
-                if len(all_images) >= n:
-                    break
+    first_batch = await _fetch_batch(n)
+    for img in first_batch:
+        if img not in seen:
+            seen.add(img)
+            all_images.append(img)
+
+    # app-chat 常见情况下单次只回 1-2 张，不足时再补批。
+    while len(all_images) < n:
+        remaining = n - len(all_images)
+        batch = await _fetch_batch(min(2, remaining))
+        if not batch:
+            break
+
+        new_items = 0
+        for img in batch:
+            if img not in seen:
+                seen.add(img)
+                all_images.append(img)
+                new_items += 1
             if len(all_images) >= n:
                 break
-        try:
-            await token_mgr.consume(token, _get_effort(model_info))
-        except Exception as e:
-            logger.warning(f"Failed to consume token: {e}")
-        usage_override = {
-            "total_tokens": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
-        }
-    else:
-        calls_needed = (n + 1) // 2
-
-        if calls_needed == 1:
-            # 单次调用
-            all_images = await call_grok(
-                token_mgr,
-                token,
-                f"Image Generation: {request.prompt}",
-                model_info,
-                response_format=response_format,
-            )
-        else:
-            # 并发调用
-            tasks = [
-                call_grok(
-                    token_mgr,
-                    token,
-                    f"Image Generation: {request.prompt}",
-                    model_info,
-                    response_format=response_format,
-                )
-                for _ in range(calls_needed)
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # 收集成功的图片
-            all_images = []
-            for result in results:
-                if isinstance(result, Exception):
-                    logger.error(f"Concurrent call failed: {result}")
-                elif isinstance(result, list):
-                    all_images.extend(result)
+        if new_items == 0:
+            break
 
     # 随机选取 n 张图片
     if len(all_images) >= n:

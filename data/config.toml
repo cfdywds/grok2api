@@ -77,3 +77,15 @@ moderated_max_retry = 5
 avoid_cjk_text = true
 concurrent = 2
 stream_timeout = 300
+
+[copilot]
+enabled = true
+lmstudio_base_url = "http://localhost:1234/v1"
+lmstudio_model = ""
+lmstudio_timeout = 60
+max_history_turns = 20
+image_model = "grok-imagine-1.0"
+image_n = 1
+image_aspect_ratio = "1:1"
+image_min_bytes = 50000
+image_max_attempts = 10

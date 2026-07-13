@@ -26,7 +26,12 @@ from app.core.config import get_config
 from app.core.exceptions import AppException, UpstreamException, ValidationException
 from app.core.logger import logger
 from app.core.storage import DATA_DIR
-from app.services.grok.utils.headers import apply_statsig, build_sso_cookie, build_grok_headers
+from app.services.grok.utils.headers import (
+    apply_statsig,
+    build_sso_cookie,
+    build_grok_headers,
+    sanitize_headers,
+)
 from app.services.grok.utils.retry import retry_on_status
 from app.services.grok.utils.urls import grok_url
 from app.services.token.service import TokenService
@@ -173,7 +178,7 @@ class BaseService:
             # 上传/删除/列表是写操作，需要 sso-rw cookie 授权
             headers["Cookie"] = build_sso_cookie(token, include_rw=True)
 
-        return headers
+        return sanitize_headers(headers)
 
     async def _get_session(self, reuse: bool = True) -> AsyncSession:
         """获取复用 Session"""

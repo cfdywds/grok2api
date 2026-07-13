@@ -17,7 +17,7 @@ from app.core.auth import verify_api_key, verify_app_key, get_admin_api_key
 from app.core.config import config, get_config
 from app.core.batch_tasks import create_task, get_task, expire_task
 from app.core.storage import get_storage, LocalStorage, RedisStorage, SQLStorage
-from app.core.exceptions import AppException, ValidationException, ErrorType
+from app.core.exceptions import AppException, ValidationException, ErrorType, UpstreamException
 from app.services.token.manager import get_token_manager
 from app.services.grok.utils.batch import run_in_batches
 import os
@@ -38,7 +38,6 @@ from app.services.grok.services.chat import GrokChatService
 from app.services.grok.services.assets import UploadService
 from app.services.grok.services.media import VideoService
 from app.services.grok.models.model import ModelService
-from app.services.grok.processors.image_ws_processors import ImageWSCollectProcessor
 from app.services.grok.processors import ImageStreamProcessor, ImageCollectProcessor
 from app.services.token import EffortType
 
@@ -53,6 +52,7 @@ router = APIRouter()
 IMAGINE_SESSION_TTL = 600
 _IMAGINE_SESSIONS: dict[str, dict] = {}
 _IMAGINE_SESSIONS_LOCK = asyncio.Lock()
+IMAGINE_BATCH_SIZE = 2
 
 
 async def _cleanup_imagine_sessions(now: float) -> None:
@@ -114,6 +114,49 @@ async def _delete_imagine_sessions(task_ids: list[str]) -> int:
                 _IMAGINE_SESSIONS.pop(task_id, None)
                 removed += 1
     return removed
+
+
+def _is_imagine_rate_limited(exc: Exception) -> bool:
+    """识别 Imagine 上游限流错误。"""
+    if isinstance(exc, AppException) and exc.status_code == 429:
+        return True
+
+    if isinstance(exc, UpstreamException):
+        details = getattr(exc, "details", None)
+        if isinstance(details, dict):
+            code = str(details.get("error_code") or "").lower()
+            message = str(details.get("error") or exc.message or "").lower()
+            if code == "rate_limit_exceeded":
+                return True
+            if "rate limit" in message or "too many requests" in message:
+                return True
+
+    text = str(exc or "").lower()
+    return "rate limit" in text or "too many requests" in text
+
+
+async def _get_imagine_token(token_mgr, model_id: str, tried_tokens: set[str]) -> Optional[str]:
+    """为 Imagine 请求选择可用 token，必要时刷新 cooling token。"""
+    token = None
+    for pool_name in ModelService.pool_candidates_for_model(model_id):
+        if pool_name not in token_mgr.pools:
+            continue
+        token = token_mgr.get_token(pool_name, exclude=tried_tokens)
+        if token:
+            return token
+
+    if not tried_tokens:
+        logger.info("No available imagine tokens, attempting to refresh cooling tokens...")
+        result = await token_mgr.refresh_cooling_tokens()
+        if result.get("recovered", 0) > 0:
+            for pool_name in ModelService.pool_candidates_for_model(model_id):
+                if pool_name not in token_mgr.pools:
+                    continue
+                token = token_mgr.get_token(pool_name, exclude=tried_tokens)
+                if token:
+                    return token
+
+    return None
 
 
 def _collect_tokens(data: dict) -> list[str]:
@@ -304,6 +347,12 @@ async def admin_video_page():
     return await render_template("video/video.html")
 
 
+@router.get("/admin/copilot", response_class=HTMLResponse, include_in_schema=False)
+async def admin_copilot_page():
+    """Copilot 图片助手页面"""
+    return await render_template("copilot/copilot.html")
+
+
 class VoiceTokenResponse(BaseModel):
     token: str
     url: str
@@ -446,45 +495,65 @@ async def admin_imagine_ws(websocket: WebSocket):
             try:
                 await token_mgr.reload_if_stale()
                 token = None
-                for pool_name in ModelService.pool_candidates_for_model(
-                    model_info.model_id
-                ):
-                    token = token_mgr.get_token(pool_name)
-                    if token:
+                images = None
+                elapsed_ms = 0
+                tried_tokens = set()
+                last_error = None
+                max_token_retries = max(1, int(get_config("retry.max_retry")))
+
+                for attempt in range(max_token_retries):
+                    token = await _get_imagine_token(
+                        token_mgr, model_info.model_id, tried_tokens
+                    )
+                    if not token:
                         break
 
-                if not token:
+                    tried_tokens.add(token)
+
+                    try:
+                        start_at = time.time()
+                        images = await image_service.generate(
+                            token=token,
+                            prompt=prompt,
+                            model_info=model_info,
+                            aspect_ratio=aspect_ratio,
+                            n=IMAGINE_BATCH_SIZE,
+                            response_format="b64_json",
+                            enable_nsfw=enable_nsfw,
+                        )
+                        elapsed_ms = int((time.time() - start_at) * 1000)
+                        last_error = None
+                        break
+                    except Exception as e:
+                        last_error = e
+                        if _is_imagine_rate_limited(e):
+                            await token_mgr.mark_rate_limited(token)
+                            logger.warning(
+                                f"Imagine token {token[:10]}... rate limited, "
+                                f"trying next token (attempt {attempt + 1}/{max_token_retries})"
+                            )
+                            token = None
+                            continue
+                        raise
+
+                if token is None:
+                    message = (
+                        str(last_error)
+                        if last_error and _is_imagine_rate_limited(last_error)
+                        else "No available tokens. Please try again later."
+                    )
                     await _send(
                         {
                             "type": "error",
-                            "message": "No available tokens. Please try again later.",
+                            "message": message,
                             "code": "rate_limit_exceeded",
                         }
                     )
                     await asyncio.sleep(2)
                     continue
 
-                upstream = image_service.stream(
-                    token=token,
-                    prompt=prompt,
-                    aspect_ratio=aspect_ratio,
-                    n=6,
-                    enable_nsfw=enable_nsfw,
-                )
-
-                processor = ImageWSCollectProcessor(
-                    model_info.model_id,
-                    token,
-                    n=6,
-                    response_format="b64_json",
-                )
-
-                start_at = time.time()
-                images = await processor.process(upstream)
-                elapsed_ms = int((time.time() - start_at) * 1000)
-
                 if images and all(img and img != "error" for img in images):
-                    # 一次发送所有 6 张图片
+                    # 每轮尽快发送一小批图片，降低首屏等待和限流风险
                     for img_b64 in images:
                         sequence += 1
                         msg = {
@@ -500,7 +569,7 @@ async def admin_imagine_ws(websocket: WebSocket):
 
                     # 图片已由客户端本地存储，服务端不再保存
 
-                    # 消耗 token（6 张图片按高成本计算）
+                    # 记录 token 消耗（后台 imagine 统一按图片高成本模型计费）
                     try:
                         effort = (
                             EffortType.HIGH
@@ -697,42 +766,62 @@ async def admin_imagine_sse(
                 try:
                     await token_mgr.reload_if_stale()
                     token = None
-                    for pool_name in ModelService.pool_candidates_for_model(
-                        model_info.model_id
-                    ):
-                        token = token_mgr.get_token(pool_name)
-                        if token:
+                    images = None
+                    elapsed_ms = 0
+                    tried_tokens = set()
+                    last_error = None
+                    max_token_retries = max(1, int(get_config("retry.max_retry")))
+
+                    for attempt in range(max_token_retries):
+                        token = await _get_imagine_token(
+                            token_mgr, model_info.model_id, tried_tokens
+                        )
+                        if not token:
                             break
 
-                    if not token:
+                        tried_tokens.add(token)
+
+                        try:
+                            start_at = time.time()
+                            images = await image_service.generate(
+                                token=token,
+                                prompt=prompt,
+                                model_info=model_info,
+                                aspect_ratio=ratio,
+                                n=IMAGINE_BATCH_SIZE,
+                                response_format="b64_json",
+                                enable_nsfw=enable_nsfw,
+                            )
+                            elapsed_ms = int((time.time() - start_at) * 1000)
+                            last_error = None
+                            break
+                        except Exception as e:
+                            last_error = e
+                            if _is_imagine_rate_limited(e):
+                                await token_mgr.mark_rate_limited(token)
+                                logger.warning(
+                                    f"Imagine SSE token {token[:10]}... rate limited, "
+                                    f"trying next token (attempt {attempt + 1}/{max_token_retries})"
+                                )
+                                token = None
+                                continue
+                            raise
+
+                    if token is None:
+                        message = (
+                            str(last_error)
+                            if last_error and _is_imagine_rate_limited(last_error)
+                            else "No available tokens. Please try again later."
+                        )
                         yield _sse_event(
                             {
                                 "type": "error",
-                                "message": "No available tokens. Please try again later.",
+                                "message": message,
                                 "code": "rate_limit_exceeded",
                             }
                         )
                         await asyncio.sleep(2)
                         continue
-
-                    upstream = image_service.stream(
-                        token=token,
-                        prompt=prompt,
-                        aspect_ratio=ratio,
-                        n=6,
-                        enable_nsfw=enable_nsfw,
-                    )
-
-                    processor = ImageWSCollectProcessor(
-                        model_info.model_id,
-                        token,
-                        n=6,
-                        response_format="b64_json",
-                    )
-
-                    start_at = time.time()
-                    images = await processor.process(upstream)
-                    elapsed_ms = int((time.time() - start_at) * 1000)
 
                     if images and all(img and img != "error" for img in images):
                         for img_b64 in images:

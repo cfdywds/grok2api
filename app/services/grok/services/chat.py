@@ -2,8 +2,10 @@
 Grok Chat 服务
 """
 
+from copy import deepcopy
+
 import orjson
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
 from curl_cffi.requests import AsyncSession
@@ -161,6 +163,20 @@ class ChatRequestBuilder:
     """请求构造器"""
 
     @staticmethod
+    def _merge_payload(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+        """递归合并 payload override，保留默认结构。"""
+        merged = deepcopy(base)
+        for key, value in (overrides or {}).items():
+            if (
+                isinstance(value, dict)
+                and isinstance(merged.get(key), dict)
+            ):
+                merged[key] = ChatRequestBuilder._merge_payload(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+
+    @staticmethod
     def build_headers(token: str) -> Dict[str, str]:
         """构造请求头"""
         return build_grok_headers(token)
@@ -172,6 +188,7 @@ class ChatRequestBuilder:
         mode: str = None,
         file_attachments: List[str] = None,
         image_attachments: List[str] = None,
+        request_overrides: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """构造请求体"""
         merged_attachments = []
@@ -213,6 +230,9 @@ class ChatRequestBuilder:
         if mode:
             payload["modelMode"] = mode
 
+        if request_overrides:
+            payload = ChatRequestBuilder._merge_payload(payload, request_overrides)
+
         return payload
 
 
@@ -231,18 +251,26 @@ class GrokChatService:
         stream: bool = None,
         file_attachments: List[str] = None,
         image_attachments: List[str] = None,
+        request_overrides: Optional[Dict[str, Any]] = None,
         raw_payload: Dict[str, Any] = None,
+        path: str = CHAT_API,
+        referer: Optional[str] = None,
     ):
         """发送聊天请求"""
         if stream is None:
             stream = get_config("chat.stream")
 
-        headers = ChatRequestBuilder.build_headers(token)
+        headers = build_grok_headers(token, referer=referer or "https://grok.com/")
         payload = (
             raw_payload
             if raw_payload is not None
             else ChatRequestBuilder.build_payload(
-                message, model, mode, file_attachments, image_attachments
+                message,
+                model,
+                mode,
+                file_attachments,
+                image_attachments,
+                request_overrides=request_overrides,
             )
         )
         proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
@@ -258,7 +286,7 @@ class GrokChatService:
             session = AsyncSession(impersonate=browser)
             try:
                 response = await session.post(
-                    grok_url(CHAT_API),
+                    grok_url(path),
                     headers=headers,
                     data=orjson.dumps(payload),
                     timeout=timeout,
@@ -283,7 +311,9 @@ class GrokChatService:
                         details={"status": response.status_code, "body": content},
                     )
 
-                logger.info(f"Chat connected: model={model}, stream={stream}")
+                logger.info(
+                    f"Chat connected: model={model}, stream={stream}, path={path}"
+                )
                 return session, response
 
             except UpstreamException:

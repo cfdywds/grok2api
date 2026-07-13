@@ -161,3 +161,27 @@ auto_upscale = true
 # 内容审核拦截后最大重试次数
 moderated_max_retry = 5
 
+
+# ==================== Copilot 图片助手 ====================
+[copilot]
+# 是否启用 Copilot 功能
+enabled = true
+# LM Studio 服务地址（OpenAI 兼容 API）
+lmstudio_base_url = "http://localhost:1234/v1"
+# LM Studio 模型名称（留空则使用当前加载的模型）
+lmstudio_model = ""
+# LM Studio 请求超时时间（秒）
+lmstudio_timeout = 60
+# 保留最近的对话轮数
+max_history_turns = 20
+# 图片生成使用的模型
+image_model = "grok-imagine-1.0"
+# 每次生成图片数量
+image_n = 1
+# 图片宽高比
+image_aspect_ratio = "1:1"
+# 对话生图最小有效图片字节数（小于该值自动重试）
+image_min_bytes = 50000
+# 对话生图最大尝试次数（避免无限重试卡死）
+image_max_attempts = 10
+

@@ -44,11 +44,45 @@ class ImageStreamProcessor(BaseProcessor):
         """构建 SSE 响应"""
         return f"event: {event}\ndata: {orjson.dumps(data).decode()}\n\n"
 
+    async def _append_images(
+        self,
+        urls: List[str],
+        target: List[str],
+        seen: set[str],
+    ) -> None:
+        """收集并去重图片 URL。"""
+        for url in urls:
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            if self.response_format == "url":
+                processed = await self.process_url(url, "image")
+                if processed:
+                    target.append(processed)
+                continue
+            try:
+                dl_service = self._get_dl()
+                base64_data = await dl_service.to_base64(url, self.token, "image")
+                if base64_data:
+                    if "," in base64_data:
+                        b64 = base64_data.split(",", 1)[1]
+                    else:
+                        b64 = base64_data
+                    target.append(b64)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to convert image to base64, falling back to URL: {e}"
+                )
+                processed = await self.process_url(url, "image")
+                if processed:
+                    target.append(processed)
+
     async def process(
         self, response: AsyncIterable[bytes]
     ) -> AsyncGenerator[str, None]:
         """处理流式响应"""
         final_images = []
+        seen_urls = set()
         idle_timeout = get_config("timeout.stream_idle_timeout")
 
         try:
@@ -61,12 +95,18 @@ class ImageStreamProcessor(BaseProcessor):
                 except orjson.JSONDecodeError:
                     continue
 
-                resp = data.get("result", {}).get("response", {})
+                result = data.get("result", {})
+                resp = result.get("response", {})
+
+                if urls := _collect_image_urls(result):
+                    await self._append_images(urls, final_images, seen_urls)
 
                 # 图片生成进度
                 if img := resp.get("streamingImageGenerationResponse"):
                     image_index = img.get("imageIndex", 0)
                     progress = img.get("progress", 0)
+                    if urls := _collect_image_urls(img):
+                        await self._append_images(urls, final_images, seen_urls)
 
                     if self.n == 1 and image_index != self.target_index:
                         continue
@@ -87,30 +127,7 @@ class ImageStreamProcessor(BaseProcessor):
                 # modelResponse
                 if mr := resp.get("modelResponse"):
                     if urls := _collect_image_urls(mr):
-                        for url in urls:
-                            if self.response_format == "url":
-                                processed = await self.process_url(url, "image")
-                                if processed:
-                                    final_images.append(processed)
-                                continue
-                            try:
-                                dl_service = self._get_dl()
-                                base64_data = await dl_service.to_base64(
-                                    url, self.token, "image"
-                                )
-                                if base64_data:
-                                    if "," in base64_data:
-                                        b64 = base64_data.split(",", 1)[1]
-                                    else:
-                                        b64 = base64_data
-                                    final_images.append(b64)
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to convert image to base64, falling back to URL: {e}"
-                                )
-                                processed = await self.process_url(url, "image")
-                                if processed:
-                                    final_images.append(processed)
+                        await self._append_images(urls, final_images, seen_urls)
                     continue
 
             for index, b64 in enumerate(final_images):
@@ -181,9 +198,44 @@ class ImageCollectProcessor(BaseProcessor):
         super().__init__(model, token)
         self.response_format = response_format
 
+    async def _append_images(
+        self,
+        urls: List[str],
+        target: List[str],
+        seen: set[str],
+    ) -> None:
+        """收集并去重图片 URL。"""
+        for url in urls:
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            if self.response_format == "url":
+                processed = await self.process_url(url, "image")
+                if processed:
+                    target.append(processed)
+                continue
+            try:
+                dl_service = self._get_dl()
+                base64_data = await dl_service.to_base64(url, self.token, "image")
+                if base64_data:
+                    if "," in base64_data:
+                        b64 = base64_data.split(",", 1)[1]
+                    else:
+                        b64 = base64_data
+                    target.append(b64)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to convert image to base64, falling back to URL: {e}"
+                )
+                processed = await self.process_url(url, "image")
+                if processed:
+                    target.append(processed)
+
     async def process(self, response: AsyncIterable[bytes]) -> List[str]:
         """处理并收集图片"""
         images = []
+        seen_urls = set()
+        last_message = ""
         idle_timeout = get_config("timeout.stream_idle_timeout")
 
         try:
@@ -196,34 +248,21 @@ class ImageCollectProcessor(BaseProcessor):
                 except orjson.JSONDecodeError:
                     continue
 
-                resp = data.get("result", {}).get("response", {})
+                result = data.get("result", {})
+                resp = result.get("response", {})
+
+                if urls := _collect_image_urls(result):
+                    await self._append_images(urls, images, seen_urls)
+
+                if img := resp.get("streamingImageGenerationResponse"):
+                    if urls := _collect_image_urls(img):
+                        await self._append_images(urls, images, seen_urls)
 
                 if mr := resp.get("modelResponse"):
+                    if msg := mr.get("message"):
+                        last_message = str(msg)
                     if urls := _collect_image_urls(mr):
-                        for url in urls:
-                            if self.response_format == "url":
-                                processed = await self.process_url(url, "image")
-                                if processed:
-                                    images.append(processed)
-                                continue
-                            try:
-                                dl_service = self._get_dl()
-                                base64_data = await dl_service.to_base64(
-                                    url, self.token, "image"
-                                )
-                                if base64_data:
-                                    if "," in base64_data:
-                                        b64 = base64_data.split(",", 1)[1]
-                                    else:
-                                        b64 = base64_data
-                                    images.append(b64)
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to convert image to base64, falling back to URL: {e}"
-                                )
-                                processed = await self.process_url(url, "image")
-                                if processed:
-                                    images.append(processed)
+                        await self._append_images(urls, images, seen_urls)
 
         except asyncio.CancelledError:
             logger.debug("Image collect cancelled by client")
@@ -241,6 +280,9 @@ class ImageCollectProcessor(BaseProcessor):
             )
         finally:
             await self.close()
+
+        if not images and last_message:
+            logger.warning(f"Image collect completed without images: {last_message}")
 
         return images
 

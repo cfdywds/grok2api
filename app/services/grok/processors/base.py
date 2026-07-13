@@ -4,6 +4,7 @@
 
 import asyncio
 import time
+import orjson
 from typing import Any, AsyncGenerator, Optional, AsyncIterable, List, TypeVar
 
 from app.core.config import get_config
@@ -61,6 +62,15 @@ def _collect_image_urls(obj: Any) -> List[str]:
                                 add(url)
                     elif isinstance(item, str):
                         add(item)
+                    continue
+                if key in {"imageUrl", "thumbnailImageUrl"} and isinstance(item, str):
+                    add(item)
+                    continue
+                if key == "jsonData" and isinstance(item, str):
+                    try:
+                        walk(orjson.loads(item))
+                    except Exception:
+                        pass
                     continue
                 walk(item)
         elif isinstance(value, list):

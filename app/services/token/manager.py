@@ -46,6 +46,8 @@ class TokenManager:
         self.pools: Dict[str, TokenPool] = {}
         self.initialized = False
         self._save_lock = asyncio.Lock()
+        self._refresh_lock = asyncio.Lock()
+        self._refresh_task: Optional[asyncio.Task] = None
         self._dirty = False
         self._save_task: Optional[asyncio.Task] = None
         self._save_delay = DEFAULT_SAVE_DELAY_MS / 1000.0
@@ -630,6 +632,23 @@ class TokenManager:
         return pool.list()
 
     async def refresh_cooling_tokens(self) -> Dict[str, int]:
+        """批量刷新 cooling 状态的 Token 配额，并发请求共享同一轮刷新。"""
+        async with self._refresh_lock:
+            if self._refresh_task and not self._refresh_task.done():
+                task = self._refresh_task
+                logger.info("Refresh check: joining in-flight cooling token refresh")
+            else:
+                task = asyncio.create_task(self._refresh_cooling_tokens_impl())
+                self._refresh_task = task
+
+        try:
+            return await task
+        finally:
+            async with self._refresh_lock:
+                if self._refresh_task is task and task.done():
+                    self._refresh_task = None
+
+    async def _refresh_cooling_tokens_impl(self) -> Dict[str, int]:
         """
         批量刷新 cooling 状态的 Token 配额
 

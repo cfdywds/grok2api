@@ -10,7 +10,11 @@ from curl_cffi.requests import AsyncSession
 from app.core.logger import logger
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException
-from app.services.grok.utils.headers import apply_statsig, build_sso_cookie
+from app.services.grok.utils.headers import (
+    apply_statsig,
+    build_sso_cookie,
+    sanitize_headers,
+)
 from app.services.grok.utils.retry import retry_on_status
 from app.services.grok.utils.urls import grok_url, apply_proxy_token
 
@@ -57,7 +61,7 @@ class UsageService:
         headers["Cookie"] = build_sso_cookie(token)
         apply_proxy_token(headers)
 
-        return headers
+        return sanitize_headers(headers)
 
     def _build_proxies(self) -> dict:
         """构建代理配置"""
